@@ -81,13 +81,17 @@ class TenantRegistrationController extends Controller
             $tenant->owner_id = $centralUser->id;
             $tenant->save();
 
-            CentralTenantUser::create([
-                'tenant_id' => $tenant->id,
-                'global_user_id' => $centralUser->global_id,
-                'role' => $role,
-                'is_owner' => true,
-                'tenant_join_date' => now(),
-            ]);
+            CentralTenantUser::updateOrCreate(
+                [
+                    'tenant_id' => $tenant->id,
+                    'global_user_id' => $centralUser->global_id,
+                ],
+                [
+                    'role' => $role,
+                    'is_owner' => true,
+                    'tenant_join_date' => now(),
+                ]
+            );
 
             $certificateService->ensureForUser($centralUser);
 

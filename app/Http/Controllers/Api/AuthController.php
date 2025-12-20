@@ -53,13 +53,17 @@ class AuthController extends Controller
                 'tenant_join_date' => now(),
             ]);
 
-            CentralTenantUser::create([
-                'tenant_id' => $tenantId,
-                'global_user_id' => $centralUser->global_id,
-                'role' => 'member',
-                'is_owner' => false,
-                'tenant_join_date' => now(),
-            ]);
+            CentralTenantUser::updateOrCreate(
+                [
+                    'tenant_id' => $tenantId,
+                    'global_user_id' => $centralUser->global_id,
+                ],
+                [
+                    'role' => 'member',
+                    'is_owner' => false,
+                    'tenant_join_date' => now(),
+                ]
+            );
 
             $certificateService->ensureForUser($centralUser);
         } catch (\Throwable $th) {

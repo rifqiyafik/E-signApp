@@ -23,6 +23,10 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('document_versions', function (Blueprint $table) {
+            $table->dropIndex(['signing_cert_fingerprint']);
+        });
+
+        Schema::table('document_versions', function (Blueprint $table) {
             $table->dropColumn([
                 'signature_algorithm',
                 'signature_value',

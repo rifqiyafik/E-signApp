@@ -40,6 +40,14 @@ class DocumentPayloadService
             ->get()
             ->keyBy('global_user_id');
 
+        $versionCertificate = $certificateMap->get($version->user_id);
+        $signatureMeta = [
+            'algorithm' => $version->signature_algorithm ?? $versionCertificate?->signature_algorithm,
+            'certificateFingerprint' => $version->signing_cert_fingerprint ?? $versionCertificate?->certificate_fingerprint,
+            'certificateSubject' => $version->signing_cert_subject ?? $versionCertificate?->certificate_subject,
+            'certificateSerial' => $version->signing_cert_serial ?? $versionCertificate?->certificate_serial,
+        ];
+
         $signers = $signerRows
             ->map(function ($signer) use ($userMap, $membershipMap, $certificateMap) {
                 $user = $userMap->get($signer->user_id);
@@ -72,12 +80,7 @@ class DocumentPayloadService
             'verificationUrl' => $verificationUrl,
             'signedPdfDownloadUrl' => $downloadUrl,
             'signedPdfSha256' => $version->signed_pdf_sha256,
-            'signature' => [
-                'algorithm' => $version->signature_algorithm,
-                'certificateFingerprint' => $version->signing_cert_fingerprint,
-                'certificateSubject' => $version->signing_cert_subject,
-                'certificateSerial' => $version->signing_cert_serial,
-            ],
+            'signature' => $signatureMeta,
             'signers' => $signers,
         ];
     }
