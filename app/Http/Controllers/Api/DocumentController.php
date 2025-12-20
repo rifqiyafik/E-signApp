@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Document;
 use App\Models\DocumentSigner;
 use App\Models\DocumentVersion;
+use App\Models\User as CentralUser;
 use App\Services\DocumentPayloadService;
 use App\Services\DocumentStampService;
+use App\Services\UserCertificateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -16,7 +18,12 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DocumentController extends Controller
 {
-    public function sign(Request $request, DocumentPayloadService $payloadService, DocumentStampService $stampService): JsonResponse
+    public function sign(
+        Request $request,
+        DocumentPayloadService $payloadService,
+        DocumentStampService $stampService,
+        UserCertificateService $certificateService
+    ): JsonResponse
     {
         $data = $request->validate([
             'file' => ['required', 'file', 'mimes:pdf'],
@@ -48,7 +55,7 @@ class DocumentController extends Controller
 
         $connection = Document::query()->getConnection();
 
-        $payload = $connection->transaction(function () use ($file, $inputHash, $tenantId, $user, $idempotencyKey, $payloadService, $stampService) {
+        $payload = $connection->transaction(function () use ($file, $inputHash, $tenantId, $user, $idempotencyKey, $payloadService, $stampService, $certificateService) {
             $existingVersion = DocumentVersion::where('signed_pdf_sha256', $inputHash)
                 ->orderByDesc('created_at')
                 ->first();
@@ -64,6 +71,14 @@ class DocumentController extends Controller
                     'created_by_user_id' => $user->global_id,
                 ]);
             }
+
+            $centralUser = CentralUser::where('global_id', $user->global_id)->first();
+
+            if (!$centralUser) {
+                abort(500, 'Central user not found.');
+            }
+
+            $signingCredentials = $certificateService->getSigningCredentials($centralUser);
 
             $nextVersionNumber = ($document->versions()->max('version_number') ?? 0) + 1;
             $verificationUrl = url("/{$tenantId}/api/verify/{$document->chain_id}/v{$nextVersionNumber}");
@@ -82,6 +97,17 @@ class DocumentController extends Controller
                 [
                     'signed_by' => $user->name,
                     'signed_at' => now()->toIso8601String(),
+                ],
+                [
+                    'certificate' => $signingCredentials['certificate'] ?? null,
+                    'privateKey' => $signingCredentials['privateKey'] ?? null,
+                    'privateKeyPassphrase' => $signingCredentials['privateKeyPassphrase'] ?? '',
+                    'info' => [
+                        'Name' => $user->name,
+                        'Location' => (string) $tenantId,
+                        'Reason' => 'Document signing',
+                        'ContactInfo' => $user->email,
+                    ],
                 ]
             );
 
@@ -91,6 +117,33 @@ class DocumentController extends Controller
 
             $outputHash = hash_file('sha256', $absolutePath);
             $outputSize = filesize($absolutePath) ?: null;
+            $signatureValue = null;
+            $signatureAlgorithm = $signingCredentials['signatureAlgorithm'] ?? null;
+            $signingFingerprint = $signingCredentials['certificateFingerprint'] ?? null;
+            $signingSubject = $signingCredentials['certificateSubject'] ?? null;
+            $signingSerial = $signingCredentials['certificateSerial'] ?? null;
+
+            $pdfBytes = file_get_contents($absolutePath);
+            $privateKey = $signingCredentials['privateKey'] ?? null;
+
+            if ($pdfBytes === false || !$privateKey) {
+                abort(500, 'Failed to read signed PDF.');
+            }
+
+            $privateKeyResource = openssl_pkey_get_private(
+                $privateKey,
+                $signingCredentials['privateKeyPassphrase'] ?? ''
+            );
+
+            if ($privateKeyResource === false) {
+                abort(500, 'Failed to load signing key.');
+            }
+
+            if (!openssl_sign($pdfBytes, $signatureRaw, $privateKeyResource, OPENSSL_ALGO_SHA256)) {
+                abort(500, 'Failed to sign PDF.');
+            }
+
+            $signatureValue = base64_encode($signatureRaw);
 
             $version = DocumentVersion::create([
                 'document_id' => $document->id,
@@ -99,6 +152,11 @@ class DocumentController extends Controller
                 'file_path' => $relativePath,
                 'signed_pdf_sha256' => $outputHash,
                 'signed_pdf_size' => $outputSize,
+                'signature_algorithm' => $signatureAlgorithm,
+                'signature_value' => $signatureValue,
+                'signing_cert_fingerprint' => $signingFingerprint,
+                'signing_cert_subject' => $signingSubject,
+                'signing_cert_serial' => $signingSerial,
                 'verification_url' => $verificationUrl,
                 'idempotency_key' => $idempotencyKey,
                 'tenant_id' => $tenantId,

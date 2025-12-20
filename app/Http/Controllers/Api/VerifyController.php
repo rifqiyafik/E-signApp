@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Document;
 use App\Models\DocumentVersion;
+use App\Models\UserCertificate;
 use App\Services\DocumentPayloadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class VerifyController extends Controller
 {
@@ -33,9 +35,11 @@ class VerifyController extends Controller
         }
 
         $payload = $payloadService->build($version->document, $version, $version->tenant_id);
+        $signatureValid = $this->verifyDetachedSignature($version);
 
         return response()->json(array_merge([
             'valid' => true,
+            'signatureValid' => $signatureValid,
         ], $payload));
     }
 
@@ -47,9 +51,49 @@ class VerifyController extends Controller
             ->firstOrFail();
 
         $payload = $payloadService->build($document, $versionModel, $versionModel->tenant_id);
+        $signatureValid = $this->verifyDetachedSignature($versionModel);
 
         return response()->json(array_merge([
             'valid' => true,
+            'signatureValid' => $signatureValid,
         ], $payload));
+    }
+
+    private function verifyDetachedSignature(DocumentVersion $version): ?bool
+    {
+        if (!$version->signature_value || !$version->user_id) {
+            return null;
+        }
+
+        $certificate = UserCertificate::where('global_user_id', $version->user_id)->first();
+
+        if (!$certificate) {
+            return null;
+        }
+
+        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        $disk = Storage::disk($version->file_disk);
+        if (!$disk->exists($version->file_path)) {
+            return null;
+        }
+
+        $pdfBytes = $disk->get($version->file_path);
+        $signatureRaw = base64_decode($version->signature_value, true);
+
+        if ($pdfBytes === false || $signatureRaw === false) {
+            return null;
+        }
+
+        $result = openssl_verify($pdfBytes, $signatureRaw, $certificate->public_key, OPENSSL_ALGO_SHA256);
+
+        if ($result === 1) {
+            return true;
+        }
+
+        if ($result === 0) {
+            return false;
+        }
+
+        return null;
     }
 }

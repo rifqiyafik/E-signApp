@@ -6,13 +6,23 @@ use setasign\Fpdi\Tcpdf\Fpdi;
 
 class DocumentStampService
 {
-    public function stamp(string $inputPath, string $outputPath, string $verificationUrl, array $context = []): void
+    public function stamp(
+        string $inputPath,
+        string $outputPath,
+        string $verificationUrl,
+        array $context = [],
+        ?array $signature = null
+    ): void
     {
         $pdf = new Fpdi('P', 'mm');
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
         $pdf->SetMargins(0, 0, 0);
         $pdf->SetAutoPageBreak(false, 0);
+
+        if ($signature) {
+            $this->applySignature($pdf, $signature);
+        }
 
         $pageCount = $pdf->setSourceFile($inputPath);
 
@@ -30,6 +40,21 @@ class DocumentStampService
         }
 
         $pdf->Output($outputPath, 'F');
+    }
+
+    private function applySignature(Fpdi $pdf, array $signature): void
+    {
+        $certificate = $signature['certificate'] ?? null;
+        $privateKey = $signature['privateKey'] ?? null;
+
+        if (!$certificate || !$privateKey) {
+            return;
+        }
+
+        $passphrase = $signature['privateKeyPassphrase'] ?? '';
+        $info = $signature['info'] ?? [];
+
+        $pdf->setSignature($certificate, $privateKey, $passphrase, '', 2, $info);
     }
 
     private function applyStamp(Fpdi $pdf, array $pageSize, string $verificationUrl, array $context): void

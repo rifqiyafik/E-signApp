@@ -9,7 +9,7 @@ from provisioning a tenant to signing, downloading, and verifying documents.
 - Tenant identifier: slug first, then ID as fallback.
 - Auth: Laravel Passport personal access tokens (per-tenant).
 - Documents: stored centrally in `documents`, `document_versions`, `document_signers`.
-- Signing pipeline: input PDF -> render with QR + text -> hash output -> save as new version.
+- Signing pipeline: input PDF -> render with QR + text -> apply X.509 signature -> hash output -> save as new version.
 
 ## 2) Base URL and tenant parameter
 
@@ -93,6 +93,52 @@ php artisan serve --host=127.0.0.1 --port=8000
 
 ## 4) Authentication
 
+### POST /auth/register
+
+Path:
+- `/{tenant}/api/auth/register`
+
+Headers:
+- `Content-Type: application/json`
+
+Body (JSON):
+- `name` (string, required)
+- `email` (string, required)
+- `password` (string, required, min 8)
+- `password_confirmation` (string, required)
+- `deviceName` (string, optional, max 100)
+
+Response:
+- `accessToken` (string)
+- `tenantId` (string)
+- `userId` (string)
+
+Notes:
+- Register generates a user keypair (private/public) and X.509 certificate using OpenSSL.
+- Private key is stored encrypted at rest.
+
+Example request:
+
+```json
+{
+  "name": "Test User",
+  "email": "test@example.com",
+  "password": "secret123",
+  "password_confirmation": "secret123",
+  "deviceName": "postman"
+}
+```
+
+Example response:
+
+```json
+{
+  "accessToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+  "tenantId": "demo",
+  "userId": "u-001"
+}
+```
+
 ### POST /auth/login
 
 Path:
@@ -173,7 +219,8 @@ Response (minimal):
 - `verificationUrl`
 - `signedPdfDownloadUrl`
 - `signedPdfSha256`
-- `signers[]` -> `index`, `tenantId`, `userId`, `signedAt`
+- `signature` -> `algorithm`, `certificateFingerprint`, `certificateSubject`, `certificateSerial`
+- `signers[]` -> `index`, `tenantId`, `userId`, `name`, `email`, `role`, `signedAt`, `certificate{serial,issuedBy,validFrom,validTo}`
 
 Example response:
 
@@ -185,11 +232,20 @@ Example response:
   "verificationUrl": "http://127.0.0.1:8000/demo/api/verify/01KCTY.../v1",
   "signedPdfDownloadUrl": "http://127.0.0.1:8000/demo/api/documents/01KCTX.../versions/v1:download",
   "signedPdfSha256": "ad8f6b6d4a...",
+  "signature": {
+    "algorithm": "sha256WithRSAEncryption",
+    "certificateFingerprint": "2c8c3b4b...",
+    "certificateSubject": "CN=Test User, emailAddress=test@example.com",
+    "certificateSerial": "1f9a..."
+  },
   "signers": [
     {
       "index": 1,
       "tenantId": "demo",
       "userId": "u-001",
+      "name": "Test User",
+      "email": "test@example.com",
+      "role": "Direktur",
       "signedAt": "2025-12-20T08:52:44+00:00"
     }
   ]
@@ -264,11 +320,50 @@ Body:
 Response (valid):
 - `valid: true`
 - plus the same payload as `documents/sign`
+- `signatureValid` -> `true | false | null`
 
 Response (invalid):
 - `valid: false`
 - `reason: "hash_not_found"`
 - `signedPdfSha256`
+
+Example response (valid):
+
+```json
+{
+  "valid": true,
+  "signatureValid": true,
+  "documentId": "01KCTX...",
+  "chainId": "01KCTY...",
+  "versionNumber": 1,
+  "verificationUrl": "http://127.0.0.1:8000/demo/api/verify/01KCTY.../v1",
+  "signedPdfDownloadUrl": "http://127.0.0.1:8000/demo/api/documents/01KCTX.../versions/v1:download",
+  "signedPdfSha256": "ad8f6b6d4a...",
+  "signature": {
+    "algorithm": "sha256WithRSAEncryption",
+    "certificateFingerprint": "2c8c3b4b...",
+    "certificateSubject": "CN=Test User, emailAddress=test@example.com",
+    "certificateSerial": "1f9a..."
+  },
+  "signers": [
+    {
+      "index": 1,
+      "tenantId": "demo",
+      "userId": "u-001",
+      "name": "Test User",
+      "email": "test@example.com",
+      "role": "Direktur",
+      "signedAt": "2025-12-20T08:52:44+00:00",
+      "certificate": {
+        "serial": "A1B2C3D4",
+        "issuedBy": "CN=Test User, emailAddress=test@example.com",
+        "validFrom": "2025-01-01",
+        "validTo": "2027-01-01"
+      }
+    }
+  ]
+}
+```
 
 ### GET /verify/{chainId}/v{version}
 
@@ -278,8 +373,14 @@ Path:
 Response:
 - `valid: true`
 - payload fields (same as sign)
+- `signatureValid` -> `true | false | null`
 
 This endpoint is the `verificationUrl` embedded into the QR code.
+
+Signature validation notes:
+- `signatureValid: true` means the detached signature matches the signed PDF and the public key.
+- `signatureValid: false` means the signature does not match the PDF.
+- `signatureValid: null` means signature metadata is missing or certificate not found.
 
 ## 8) Common errors
 
@@ -291,7 +392,7 @@ This endpoint is the `verificationUrl` embedded into the QR code.
 ## 9) Frontend and mobile usage
 
 Minimum client flow:
-1) `POST /auth/login` -> save `accessToken`.
+1) `POST /auth/register` (first time) or `POST /auth/login` -> save `accessToken`.
 2) Send `Authorization: Bearer {accessToken}` on all protected requests.
 3) `POST /documents/sign` -> get `verificationUrl` and `signedPdfDownloadUrl`.
 4) Use `verificationUrl` to show QR or verify via `/verify`.

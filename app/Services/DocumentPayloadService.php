@@ -4,6 +4,9 @@ namespace App\Services;
 
 use App\Models\Document;
 use App\Models\DocumentVersion;
+use App\Models\TenantUser as CentralTenantUser;
+use App\Models\User as CentralUser;
+use App\Models\UserCertificate;
 
 class DocumentPayloadService
 {
@@ -18,15 +21,45 @@ class DocumentPayloadService
             ? url("/{$tenantId}/api/verify/{$document->chain_id}/v{$version->version_number}")
             : null);
 
-        $signers = $document->signers()
+        $signerRows = $document->signers()
             ->orderBy('signer_index')
+            ->get();
+
+        $userIds = $signerRows->pluck('user_id')->filter()->unique()->values();
+        $tenantIds = $signerRows->pluck('tenant_id')->filter()->unique()->values();
+        $userMap = CentralUser::whereIn('global_id', $userIds)
             ->get()
-            ->map(function ($signer) {
+            ->keyBy('global_id');
+        $membershipMap = CentralTenantUser::whereIn('tenant_id', $tenantIds)
+            ->whereIn('global_user_id', $userIds)
+            ->get()
+            ->keyBy(function ($membership) {
+                return $membership->tenant_id . '|' . $membership->global_user_id;
+            });
+        $certificateMap = UserCertificate::whereIn('global_user_id', $userIds)
+            ->get()
+            ->keyBy('global_user_id');
+
+        $signers = $signerRows
+            ->map(function ($signer) use ($userMap, $membershipMap, $certificateMap) {
+                $user = $userMap->get($signer->user_id);
+                $membership = $membershipMap->get($signer->tenant_id . '|' . $signer->user_id);
+                $certificate = $certificateMap->get($signer->user_id);
+
                 return [
                     'index' => $signer->signer_index,
                     'tenantId' => $signer->tenant_id,
                     'userId' => $signer->user_id,
+                    'name' => $user?->name,
+                    'email' => $user?->email,
+                    'role' => $membership?->role,
                     'signedAt' => optional($signer->signed_at)->toIso8601String(),
+                    'certificate' => [
+                        'serial' => $certificate?->certificate_serial,
+                        'issuedBy' => $certificate?->certificate_issuer,
+                        'validFrom' => optional($certificate?->valid_from)->toDateString(),
+                        'validTo' => optional($certificate?->valid_to)->toDateString(),
+                    ],
                 ];
             })
             ->values()
@@ -39,6 +72,12 @@ class DocumentPayloadService
             'verificationUrl' => $verificationUrl,
             'signedPdfDownloadUrl' => $downloadUrl,
             'signedPdfSha256' => $version->signed_pdf_sha256,
+            'signature' => [
+                'algorithm' => $version->signature_algorithm,
+                'certificateFingerprint' => $version->signing_cert_fingerprint,
+                'certificateSubject' => $version->signing_cert_subject,
+                'certificateSerial' => $version->signing_cert_serial,
+            ],
             'signers' => $signers,
         ];
     }

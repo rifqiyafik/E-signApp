@@ -30,6 +30,7 @@ Route::prefix('public')->group(function () {
 });
 
 // Auth (login is public)
+Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/login', [AuthController::class, 'login']);
 
 // Verify endpoints (public)
