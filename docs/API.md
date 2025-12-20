@@ -23,11 +23,11 @@ download versi, hingga verifikasi dokumen.
 ## 3) Base URL dan tenant parameter
 
 Base URL format:
-- `http://127.0.0.1:8000/{tenant}/api`
+- `http://13.229.151.205/{tenant}/api`
 
 Contoh:
-- `http://127.0.0.1:8000/demo/api` (slug)
-- `http://127.0.0.1:8000/01KCTVRDZ7F51PJHM5C70PK00W/api` (tenant ID)
+- `http://13.229.151.205/nusanett/api` (slug)
+- `http://13.229.151.205/01KCTVRDZ7F51PJHM5C70PK00W/api` (tenant ID)
 
 Behavior:
 - Tenant tidak ditemukan -> `404`.
