@@ -26,6 +26,60 @@ Behavior:
 
 ## 3) Local setup (dev)
 
+## 3.1) Register tenant + user (testing flow)
+
+Endpoint ini dibuat untuk testing agar FE bisa membuat tenant baru sekaligus user pertama.
+Jalankan di central (tanpa `{tenant}` pada path).
+
+### POST /api/tenants/register
+
+Headers:
+- `Content-Type: application/json`
+
+Body (JSON):
+- `tenantName` (string, required)
+- `tenantSlug` (string, optional, auto-generate jika kosong)
+- `name` (string, required)
+- `email` (string, required)
+- `password` (string, required, min 8)
+- `password_confirmation` (string, required)
+- `role` (string, optional, default: `owner`)
+
+Response:
+- `accessToken` (string)
+- `tenantId` (string)
+- `tenantSlug` (string)
+- `userId` (string)
+
+Example request:
+
+```json
+{
+  "tenantName": "Demo Company",
+  "tenantSlug": "demo",
+  "name": "Rifqi Yafik",
+  "email": "rifqi@domain.com",
+  "password": "secret123",
+  "password_confirmation": "secret123",
+  "role": "Direktur"
+}
+```
+
+Example response:
+
+```json
+{
+  "accessToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+  "tenantId": "01KCTVRDZ7F51PJHM5C70PK00W",
+  "tenantSlug": "demo",
+  "userId": "01KCTVRDNTV8QZDACE56SX1HXG"
+}
+```
+
+Notes:
+- Endpoint ini untuk testing/dev. Untuk production sebaiknya pakai flow invitation atau approval.
+
+
 1) Configure `.env` for the central database.
 
 2) Run central migrations:
@@ -106,7 +160,6 @@ Body (JSON):
 - `email` (string, required)
 - `password` (string, required, min 8)
 - `password_confirmation` (string, required)
-- `deviceName` (string, optional, max 100)
 
 Response:
 - `accessToken` (string)
@@ -124,8 +177,7 @@ Example request:
   "name": "Test User",
   "email": "test@example.com",
   "password": "secret123",
-  "password_confirmation": "secret123",
-  "deviceName": "postman"
+  "password_confirmation": "secret123"
 }
 ```
 
@@ -150,7 +202,6 @@ Headers:
 Body (JSON):
 - `email` (string, required)
 - `password` (string, required)
-- `deviceName` (string, optional, max 100) -> token label (example: "postman")
 
 Response:
 - `accessToken` (string)
@@ -162,8 +213,7 @@ Example request:
 ```json
 {
   "email": "test@example.com",
-  "password": "secret123",
-  "deviceName": "postman"
+  "password": "secret123"
 }
 ```
 
@@ -398,5 +448,4 @@ Minimum client flow:
 4) Use `verificationUrl` to show QR or verify via `/verify`.
 
 Notes:
-- `deviceName` is only a label for the token. It does not affect auth.
 - The signed PDF hash is calculated from the rendered, stamped PDF, not the input file.

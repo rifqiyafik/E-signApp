@@ -21,7 +21,6 @@ class AuthController extends Controller
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:255'],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
-            'deviceName' => ['nullable', 'string', 'max:100'],
         ]);
 
         $tenantId = tenant('id');
@@ -71,7 +70,7 @@ class AuthController extends Controller
             throw $th;
         }
 
-        $token = $tenantUser->createToken($data['deviceName'] ?? 'api')->accessToken;
+        $token = $tenantUser->createToken('api')->accessToken;
 
         return response()->json([
             'accessToken' => $token,
@@ -85,7 +84,6 @@ class AuthController extends Controller
         $data = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
-            'deviceName' => ['nullable', 'string', 'max:100'],
         ]);
 
         $user = TenantUser::where('email', $data['email'])->first();
@@ -102,7 +100,7 @@ class AuthController extends Controller
             'last_login_user_agent' => $request->userAgent(),
         ])->save();
 
-        $token = $user->createToken($data['deviceName'] ?? 'api')->accessToken;
+        $token = $user->createToken('api')->accessToken;
 
         return response()->json([
             'accessToken' => $token,
