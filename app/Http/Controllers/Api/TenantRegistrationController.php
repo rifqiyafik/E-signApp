@@ -19,6 +19,11 @@ class TenantRegistrationController extends Controller
 {
     public function register(Request $request, UserCertificateService $certificateService): JsonResponse
     {
+        $request->merge([
+            'tenantSlug' => $request->input('tenantSlug') ?: null,
+            'role' => $request->input('role') ?: null,
+        ]);
+
         $data = $request->validate([
             'tenantName' => ['required', 'string', 'max:150'],
             'tenantSlug' => ['nullable', 'string', 'max:60', 'alpha_dash'],
@@ -95,7 +100,7 @@ class TenantRegistrationController extends Controller
 
         $token = null;
 
-        $tenant->run(function () use ($data, $tenant, $role, $centralUser, &$token) {
+        $tenant->run(function () use ($data, $tenant, $role, $centralUser, $certificateService, &$token) {
             $tenantUser = TenantUser::create([
                 'global_id' => $centralUser->global_id,
                 'name' => $data['name'],
@@ -115,6 +120,8 @@ class TenantRegistrationController extends Controller
                 );
             }
 
+            $this->ensurePassportKeys($certificateService);
+
             $token = $tenantUser->createToken('api')->accessToken;
         });
 
@@ -124,5 +131,66 @@ class TenantRegistrationController extends Controller
             'tenantSlug' => $tenant->slug,
             'userId' => $centralUser->global_id,
         ], 201);
+    }
+
+    private function ensurePassportKeys(UserCertificateService $certificateService): void
+    {
+        $privateKeyPath = storage_path('oauth-private.key');
+        $publicKeyPath = storage_path('oauth-public.key');
+
+        $privateKeyContent = file_exists($privateKeyPath) ? file_get_contents($privateKeyPath) : null;
+        $publicKeyContent = file_exists($publicKeyPath) ? file_get_contents($publicKeyPath) : null;
+
+        if ($privateKeyContent && $publicKeyContent) {
+            $privateValid = openssl_pkey_get_private($privateKeyContent) !== false;
+            $publicValid = openssl_pkey_get_public($publicKeyContent) !== false;
+
+            if ($privateValid && $publicValid) {
+                return;
+            }
+        }
+
+        $opensslConfig = $certificateService->getOpenSslConfigPath();
+
+        $privateKeyConfig = [
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+            'private_key_bits' => 2048,
+        ];
+
+        if ($opensslConfig) {
+            $privateKeyConfig['config'] = $opensslConfig;
+        }
+
+        $privateKey = openssl_pkey_new($privateKeyConfig);
+        if ($privateKey === false) {
+            throw new \RuntimeException('Failed to generate Passport private key.');
+        }
+
+        $exportOptions = [];
+        if ($opensslConfig) {
+            $exportOptions['config'] = $opensslConfig;
+        }
+
+        $exported = $exportOptions
+            ? openssl_pkey_export($privateKey, $privateKeyPem, null, $exportOptions)
+            : openssl_pkey_export($privateKey, $privateKeyPem);
+
+        if (!$exported) {
+            throw new \RuntimeException('Failed to export Passport private key.');
+        }
+
+        $publicKeyDetails = openssl_pkey_get_details($privateKey);
+        $publicKeyPem = $publicKeyDetails['key'] ?? null;
+        if (!$publicKeyPem) {
+            throw new \RuntimeException('Failed to extract Passport public key.');
+        }
+
+        $privateDir = dirname($privateKeyPath);
+        if (!is_dir($privateDir)) {
+            @mkdir($privateDir, 0775, true);
+        }
+
+        file_put_contents($privateKeyPath, $privateKeyPem);
+        file_put_contents($publicKeyPath, $publicKeyPem);
     }
 }

@@ -21,6 +21,11 @@ class UserCertificateService
         return $this->generateForUser($user);
     }
 
+    public function getOpenSslConfigPath(): ?string
+    {
+        return $this->resolveOpenSslConfig();
+    }
+
     public function getSigningCredentials(User $user): array
     {
         $certificate = $this->ensureForUser($user);
@@ -62,8 +67,26 @@ class UserCertificateService
 
         $passphrase = Str::random(32);
 
-        if (!openssl_pkey_export($privateKey, $privateKeyPem, $passphrase)) {
-            throw new \RuntimeException('Failed to export private key.' . $this->getOpenSslError());
+        $exportOptions = [];
+        if ($opensslConfig) {
+            $exportOptions['config'] = $opensslConfig;
+        }
+
+        $exported = $exportOptions
+            ? openssl_pkey_export($privateKey, $privateKeyPem, $passphrase, $exportOptions)
+            : openssl_pkey_export($privateKey, $privateKeyPem, $passphrase);
+
+        if (!$exported) {
+            // Fallback: export without passphrase if OpenSSL config is problematic.
+            $passphrase = null;
+            $exported = $exportOptions
+                ? openssl_pkey_export($privateKey, $privateKeyPem, null, $exportOptions)
+                : openssl_pkey_export($privateKey, $privateKeyPem);
+        }
+
+        if (!$exported) {
+            $configInfo = $opensslConfig ? ' (config: ' . $opensslConfig . ')' : '';
+            throw new \RuntimeException('Failed to export private key.' . $this->getOpenSslError() . $configInfo);
         }
 
         $dn = [
@@ -126,10 +149,106 @@ class UserCertificateService
             'valid_from' => $validFrom,
             'valid_to' => $validTo,
             'private_key_encrypted' => Crypt::encryptString($privateKeyPem),
-            'private_key_passphrase_encrypted' => Crypt::encryptString($passphrase),
+            'private_key_passphrase_encrypted' => $passphrase ? Crypt::encryptString($passphrase) : null,
             'key_algorithm' => 'RSA',
             'signature_algorithm' => $certificateInfo['signatureTypeLN'] ?? 'sha256WithRSAEncryption',
         ]);
+    }
+
+
+    private function resolveOpenSslConfig(): ?string
+    {
+        $envPath = env('OPENSSL_CONF');
+        if (is_string($envPath) && $envPath !== '' && file_exists($envPath)) {
+            $this->exportOpenSslConfigEnv($envPath);
+            return $envPath;
+        }
+
+        $locations = openssl_get_cert_locations();
+        $defaultConf = $locations['default_conf_file'] ?? null;
+        if (is_string($defaultConf) && $defaultConf !== '' && file_exists($defaultConf)) {
+            $this->exportOpenSslConfigEnv($defaultConf);
+            return $defaultConf;
+        }
+
+        $defaultConfDir = $locations['default_conf_dir'] ?? null;
+        if (is_string($defaultConfDir) && $defaultConfDir !== '') {
+            $candidate = rtrim($defaultConfDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'openssl.cnf';
+            if (file_exists($candidate)) {
+                $this->exportOpenSslConfigEnv($candidate);
+                return $candidate;
+            }
+        }
+
+        $candidates = [
+            base_path('openssl.cnf'),
+            base_path('extras/ssl/openssl.cnf'),
+            base_path('ssl/openssl.cnf'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (file_exists($candidate)) {
+                $this->exportOpenSslConfigEnv($candidate);
+                return $candidate;
+            }
+        }
+
+        $fallback = storage_path('app/openssl.cnf');
+        if (!file_exists($fallback) || !str_contains((string) @file_get_contents($fallback), 'openssl_conf')) {
+            $dir = dirname($fallback);
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0775, true);
+            }
+            @file_put_contents($fallback, $this->defaultOpenSslConfig());
+        }
+
+        if (file_exists($fallback)) {
+            $this->exportOpenSslConfigEnv($fallback);
+            return $fallback;
+        }
+
+        return null;
+    }
+
+    private function defaultOpenSslConfig(): string
+    {
+        return <<<CONF
+openssl_conf = openssl_init
+
+[ openssl_init ]
+providers = provider_sect
+
+[ provider_sect ]
+default = default_sect
+
+[ default_sect ]
+activate = 1
+
+[ req ]
+default_bits       = 2048
+default_md         = sha256
+prompt             = no
+distinguished_name = req_distinguished_name
+
+[ req_distinguished_name ]
+CN = E-Signer
+CONF;
+    }
+
+    private function exportOpenSslConfigEnv(string $path): void
+    {
+        putenv('OPENSSL_CONF=' . $path);
+    }
+
+    private function getOpenSslError(): string
+    {
+        $errors = [];
+
+        while ($error = openssl_error_string()) {
+            $errors[] = $error;
+        }
+
+        return $errors ? ' OpenSSL error: ' . implode(' | ', $errors) : '';
     }
 
     private function formatCertificateName(?array $name): ?string
