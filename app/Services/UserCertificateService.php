@@ -44,21 +44,26 @@ class UserCertificateService
 
     private function generateForUser(User $user): UserCertificate
     {
+        $opensslConfig = $this->resolveOpenSslConfig();
         $privateKeyConfig = [
             'private_key_type' => OPENSSL_KEYTYPE_RSA,
             'private_key_bits' => 2048,
         ];
 
+        if ($opensslConfig) {
+            $privateKeyConfig['config'] = $opensslConfig;
+        }
+
         $privateKey = openssl_pkey_new($privateKeyConfig);
 
         if ($privateKey === false) {
-            throw new \RuntimeException('Failed to generate private key.');
+            throw new \RuntimeException('Failed to generate private key.' . $this->getOpenSslError());
         }
 
         $passphrase = Str::random(32);
 
         if (!openssl_pkey_export($privateKey, $privateKeyPem, $passphrase)) {
-            throw new \RuntimeException('Failed to export private key.');
+            throw new \RuntimeException('Failed to export private key.' . $this->getOpenSslError());
         }
 
         $dn = [
@@ -68,16 +73,26 @@ class UserCertificateService
             'countryName' => 'ID',
         ];
 
-        $csr = openssl_csr_new($dn, $privateKey, ['digest_alg' => 'sha256']);
-
-        if ($csr === false) {
-            throw new \RuntimeException('Failed to generate CSR.');
+        $csrOptions = ['digest_alg' => 'sha256'];
+        if ($opensslConfig) {
+            $csrOptions['config'] = $opensslConfig;
         }
 
-        $certificate = openssl_csr_sign($csr, null, $privateKey, 365, ['digest_alg' => 'sha256']);
+        $csr = openssl_csr_new($dn, $privateKey, $csrOptions);
+
+        if ($csr === false) {
+            throw new \RuntimeException('Failed to generate CSR.' . $this->getOpenSslError());
+        }
+
+        $certOptions = ['digest_alg' => 'sha256'];
+        if ($opensslConfig) {
+            $certOptions['config'] = $opensslConfig;
+        }
+
+        $certificate = openssl_csr_sign($csr, null, $privateKey, 365, $certOptions);
 
         if ($certificate === false) {
-            throw new \RuntimeException('Failed to generate X.509 certificate.');
+            throw new \RuntimeException('Failed to generate X.509 certificate.' . $this->getOpenSslError());
         }
 
         if (!openssl_x509_export($certificate, $certificatePem)) {
