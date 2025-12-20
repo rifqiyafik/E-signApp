@@ -1,0 +1,128 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\Tenant;
+use App\Models\TenantUser as CentralTenantUser;
+use App\Models\Tenant\User as TenantUser;
+use App\Models\User as CentralUser;
+use App\Services\UserCertificateService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Laravel\Passport\ClientRepository;
+use Laravel\Passport\PersonalAccessClient;
+
+class TenantRegistrationController extends Controller
+{
+    public function register(Request $request, UserCertificateService $certificateService): JsonResponse
+    {
+        $data = $request->validate([
+            'tenantName' => ['required', 'string', 'max:150'],
+            'tenantSlug' => ['nullable', 'string', 'max:60', 'alpha_dash'],
+            'name' => ['required', 'string', 'max:120'],
+            'email' => ['required', 'email', 'max:255'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'role' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        if (CentralUser::where('email', $data['email'])->exists()) {
+            return response()->json([
+                'message' => 'Email already registered. Please login.',
+            ], 409);
+        }
+
+        if (Tenant::where('name', $data['tenantName'])->exists()) {
+            return response()->json([
+                'message' => 'Tenant name already exists.',
+            ], 409);
+        }
+
+        $slug = $data['tenantSlug'] ?? null;
+        if ($slug) {
+            $slug = Str::slug($slug);
+
+            if (Tenant::where('slug', $slug)->exists()) {
+                return response()->json([
+                    'message' => 'Tenant slug already exists.',
+                ], 409);
+            }
+        } else {
+            $slug = Tenant::generateSlug($data['tenantName']);
+        }
+
+        $role = $data['role'] ?? 'owner';
+
+        $tenant = Tenant::create([
+            'name' => $data['tenantName'],
+            'slug' => $slug,
+            'code' => Tenant::generateCode(),
+        ]);
+
+        $centralUser = null;
+
+        try {
+            DB::beginTransaction();
+
+            $centralUser = CentralUser::create([
+                'global_id' => (string) Str::ulid(),
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => $data['password'],
+            ]);
+
+            $tenant->owner_id = $centralUser->id;
+            $tenant->save();
+
+            CentralTenantUser::create([
+                'tenant_id' => $tenant->id,
+                'global_user_id' => $centralUser->global_id,
+                'role' => $role,
+                'is_owner' => true,
+                'tenant_join_date' => now(),
+            ]);
+
+            $certificateService->ensureForUser($centralUser);
+
+            DB::commit();
+        } catch (\Throwable $th) {
+            DB::rollBack();
+            $tenant->delete();
+            throw $th;
+        }
+
+        $token = null;
+
+        $tenant->run(function () use ($data, $tenant, $role, $centralUser, &$token) {
+            $tenantUser = TenantUser::create([
+                'global_id' => $centralUser->global_id,
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => $data['password'],
+                'tenant_id' => $tenant->id,
+                'role' => $role,
+                'is_owner' => true,
+                'tenant_join_date' => now(),
+            ]);
+
+            if (!PersonalAccessClient::query()->exists()) {
+                app(ClientRepository::class)->createPersonalAccessClient(
+                    null,
+                    'Tenant Personal Access',
+                    config('app.url') ?: url('/')
+                );
+            }
+
+            $token = $tenantUser->createToken('api')->accessToken;
+        });
+
+        return response()->json([
+            'accessToken' => $token,
+            'tenantId' => $tenant->id,
+            'tenantSlug' => $tenant->slug,
+            'userId' => $centralUser->global_id,
+        ], 201);
+    }
+}
