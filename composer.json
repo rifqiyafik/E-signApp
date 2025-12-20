@@ -11,8 +11,11 @@
         "laravel/passport": "^12.0",
         "laravel/tinker": "^2.10.1",
         "owen-it/laravel-auditing": "^14.0",
+        "setasign/fpdi": "^2.6",
+        "setasign/fpdi-tcpdf": "^2.3",
         "spatie/laravel-permission": "^6.0",
-        "stancl/tenancy": "^3.9"
+        "stancl/tenancy": "^3.9",
+        "tecnickcom/tcpdf": "^6.10"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

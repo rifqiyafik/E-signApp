@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DocumentController;
+use App\Http\Controllers\Api\VerifyController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -26,15 +29,25 @@ Route::prefix('public')->group(function () {
     });
 });
 
+// Auth (login is public)
+Route::post('/auth/login', [AuthController::class, 'login']);
+
+// Verify endpoints (public)
+Route::post('/verify', [VerifyController::class, 'verify']);
+Route::get('/verify/{chainId}/v{version}', [VerifyController::class, 'show'])
+    ->whereNumber('version');
+
 // Protected routes (auth required)
 Route::middleware(['auth:api'])->group(function () {
-    // Profile
-    Route::get('/profile', function () {
-        return response()->json([
-            'user' => auth()->user(),
-            'tenant' => tenant(),
-        ]);
-    });
+    Route::get('/auth/me', [AuthController::class, 'me']);
+
+    // Documents
+    Route::post('/documents/sign', [DocumentController::class, 'sign']);
+    Route::get('/documents/{document}', [DocumentController::class, 'show']);
+    Route::get('/documents/{document}/versions', [DocumentController::class, 'versions']);
+    Route::get('/documents/{document}/versions/latest:download', [DocumentController::class, 'downloadLatest']);
+    Route::get('/documents/{document}/versions/v{version}:download', [DocumentController::class, 'downloadVersion'])
+        ->whereNumber('version');
 
     // Add more authenticated routes here
     // Route::apiResource('users', UserController::class);
