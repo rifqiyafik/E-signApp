@@ -6,7 +6,12 @@
         "build": "vite build",
         "dev": "vite"
     },
+    "dependencies": {
+        "@inertiajs/vue3": "^2.3.4",
+        "vue": "^3.5.26"
+    },
     "devDependencies": {
+        "@vitejs/plugin-vue": "^6.0.3",
         "@tailwindcss/vite": "^4.0.0",
         "axios": "^1.11.0",
         "concurrently": "^9.0.1",

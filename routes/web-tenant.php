@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 /*
 |--------------------------------------------------------------------------
@@ -17,8 +18,8 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/', function () {
-    return view('tenant.welcome', [
-        'tenant' => tenant(),
+    return Inertia::render('Tenant/Welcome', [
+        'tenant' => tenant()?->only(['id', 'name', 'slug']),
     ]);
 })->name('tenant.home');
 
