@@ -42,8 +42,11 @@ const handleDrop = (event) => {
     processFile(file);
 };
 
+<<<<<<< HEAD
 // comment
 
+=======
+>>>>>>> main
 const processFile = (file) => {
     if (file && file.type === "application/pdf") {
         selectedFile.value = file;
