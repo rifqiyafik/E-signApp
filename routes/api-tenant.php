@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DocumentController;
+use App\Http\Controllers\Api\PkiController;
 use App\Http\Controllers\Api\VerifyController;
 use Illuminate\Support\Facades\Route;
 
@@ -37,10 +38,21 @@ Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/verify', [VerifyController::class, 'verify']);
 Route::get('/verify/{chainId}/v{version}', [VerifyController::class, 'show'])
     ->whereNumber('version');
+Route::post('/verify/{chainId}/v{version}', [VerifyController::class, 'verifyFileForVersion'])
+    ->whereNumber('version');
+
+// PKI endpoints (public)
+Route::get('/pki/root-ca', [PkiController::class, 'rootCa']);
 
 // Protected routes (auth required)
 Route::middleware(['auth:api'])->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
+
+    // PKI (authenticated)
+    Route::get('/pki/certificates/me', [PkiController::class, 'me']);
+    Route::post('/pki/certificates/me/enroll', [PkiController::class, 'enroll']);
+    Route::post('/pki/certificates/me/renew', [PkiController::class, 'renew']);
+    Route::post('/pki/certificates/me/revoke', [PkiController::class, 'revoke']);
 
     // Documents
     Route::post('/documents/sign', [DocumentController::class, 'sign']);

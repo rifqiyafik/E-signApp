@@ -17,6 +17,7 @@ class UserCertificate extends Model
     protected $casts = [
         'valid_from' => 'datetime',
         'valid_to' => 'datetime',
+        'revoked_at' => 'datetime',
     ];
 
     public function user(): BelongsTo

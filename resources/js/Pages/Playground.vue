@@ -140,6 +140,69 @@ const documentState = reactive({
 
 const documentIdInput = ref('');
 
+const downloadState = reactive({
+    loading: false,
+});
+
+const downloadErrors = reactive({
+    sign: '',
+    verifyFile: '',
+    verifyChain: '',
+    documents: '',
+});
+
+const toAbsoluteUrl = (url) => {
+    if (!url) {
+        return '';
+    }
+    if (/^https?:\/\//i.test(url)) {
+        return url;
+    }
+    if (baseOrigin.value) {
+        return `${baseOrigin.value}${url.startsWith('/') ? '' : '/'}${url}`;
+    }
+    return url;
+};
+
+const buildFileName = (prefix, documentId, version) => {
+    const safeId = documentId ? String(documentId).replace(/[^a-zA-Z0-9_-]/g, '') : 'document';
+    const safeVersion = version ? `-v${version}` : '';
+    return `${prefix}-${safeId}${safeVersion}.pdf`;
+};
+
+const signDownloadUrl = computed(() => signState.data?.signedPdfDownloadUrl || '');
+const verifyFileDownload = computed(() => ({
+    url: verifyState.data?.signedPdfDownloadUrl || '',
+    documentId: verifyState.data?.documentId,
+    version: verifyState.data?.versionNumber,
+}));
+
+const verifyChainDownload = computed(() => ({
+    url: verifyChainState.data?.signedPdfDownloadUrl || '',
+    documentId: verifyChainState.data?.documentId,
+    version: verifyChainState.data?.versionNumber,
+}));
+
+const latestDownloadUrl = computed(() => {
+    if (documentState.data?.latestVersion?.signedPdfDownloadUrl) {
+        return documentState.data.latestVersion.signedPdfDownloadUrl;
+    }
+    if (documentIdInput.value) {
+        return `${tenantBaseUrl.value}/documents/${documentIdInput.value}/versions/latest:download`;
+    }
+    return '';
+});
+
+const versionDownloads = computed(() => {
+    const versions = documentState.versions?.versions || [];
+    return versions
+        .map((version) => ({
+            versionNumber: version?.versionNumber,
+            url: version?.signedPdfDownloadUrl || '',
+        }))
+        .filter((version) => version.url);
+});
+
 const setFromPayload = (payload) => {
     if (!payload) {
         return;
@@ -377,6 +440,39 @@ const handleSignFile = (event) => {
 
 const handleVerifyFile = (event) => {
     verifyFile.value = event.target.files?.[0] || null;
+};
+
+const downloadPdf = async (scope, url, fileName) => {
+    downloadState.loading = true;
+    downloadErrors[scope] = '';
+    try {
+        if (!url) {
+            throw new Error('Download URL not available yet.');
+        }
+        if (!authToken.value) {
+            throw new Error('Login first to download.');
+        }
+        const response = await axios.get(toAbsoluteUrl(url), {
+            responseType: 'blob',
+            headers: {
+                Authorization: `Bearer ${authToken.value}`,
+            },
+        });
+        const blob = new Blob([response.data], {
+            type: response.headers['content-type'] || 'application/pdf',
+        });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = fileName || 'signed-document.pdf';
+        document.body.appendChild(link);
+        link.click();
+        URL.revokeObjectURL(link.href);
+        link.remove();
+    } catch (error) {
+        downloadErrors[scope] = formatError(error);
+    } finally {
+        downloadState.loading = false;
+    }
 };
 
 let observer;
@@ -658,6 +754,17 @@ watch(baseOriginInput, (value) => {
                             </div>
                         </form>
                         <div v-if="signState.error" class="status status--error">{{ signState.error }}</div>
+                        <div v-if="signDownloadUrl" class="form-actions">
+                            <button
+                                class="btn btn--ghost"
+                                type="button"
+                                :disabled="downloadState.loading"
+                                @click="downloadPdf('sign', signDownloadUrl, buildFileName('signed', signState.data?.documentId, signState.data?.versionNumber))"
+                            >
+                                {{ downloadState.loading ? 'Downloading...' : 'Download signed PDF' }}
+                            </button>
+                        </div>
+                        <div v-if="downloadErrors.sign" class="status status--error">{{ downloadErrors.sign }}</div>
                         <pre v-if="signState.data"><code v-text="prettyJson(signState.data)"></code></pre>
                     </article>
                 </div>
@@ -684,6 +791,17 @@ watch(baseOriginInput, (value) => {
                             </div>
                         </form>
                         <div v-if="verifyState.error" class="status status--error">{{ verifyState.error }}</div>
+                        <div v-if="verifyFileDownload.url" class="form-actions">
+                            <button
+                                class="btn btn--ghost"
+                                type="button"
+                                :disabled="downloadState.loading"
+                                @click="downloadPdf('verifyFile', verifyFileDownload.url, buildFileName('verified', verifyFileDownload.documentId, verifyFileDownload.version))"
+                            >
+                                {{ downloadState.loading ? 'Downloading...' : 'Download verified PDF' }}
+                            </button>
+                        </div>
+                        <div v-if="downloadErrors.verifyFile" class="status status--error">{{ downloadErrors.verifyFile }}</div>
                         <pre v-if="verifyState.data"><code v-text="prettyJson(verifyState.data)"></code></pre>
                     </article>
 
@@ -705,6 +823,17 @@ watch(baseOriginInput, (value) => {
                             </div>
                         </form>
                         <div v-if="verifyChainState.error" class="status status--error">{{ verifyChainState.error }}</div>
+                        <div v-if="verifyChainDownload.url" class="form-actions">
+                            <button
+                                class="btn btn--ghost"
+                                type="button"
+                                :disabled="downloadState.loading"
+                                @click="downloadPdf('verifyChain', verifyChainDownload.url, buildFileName('verified', verifyChainDownload.documentId, verifyChainDownload.version))"
+                            >
+                                {{ downloadState.loading ? 'Downloading...' : 'Download verified PDF' }}
+                            </button>
+                        </div>
+                        <div v-if="downloadErrors.verifyChain" class="status status--error">{{ downloadErrors.verifyChain }}</div>
                         <pre v-if="verifyChainState.data"><code v-text="prettyJson(verifyChainState.data)"></code></pre>
                     </article>
                 </div>
@@ -732,9 +861,32 @@ watch(baseOriginInput, (value) => {
                                 <button class="btn btn--ghost" type="button" @click="fetchVersions" :disabled="documentState.loading">
                                     Get versions
                                 </button>
+                                <button
+                                    v-if="latestDownloadUrl"
+                                    class="btn btn--ghost"
+                                    type="button"
+                                    :disabled="downloadState.loading"
+                                    @click="downloadPdf('documents', latestDownloadUrl, buildFileName('signed', documentIdInput, documentState.data?.latestVersion?.versionNumber))"
+                                >
+                                    {{ downloadState.loading ? 'Downloading...' : 'Download latest PDF' }}
+                                </button>
                             </div>
                         </div>
                         <div v-if="documentState.error" class="status status--error">{{ documentState.error }}</div>
+                        <div v-if="downloadErrors.documents" class="status status--error">{{ downloadErrors.documents }}</div>
+                        <div v-if="versionDownloads.length" class="mini">
+                            <div class="mini-row" v-for="version in versionDownloads" :key="version.versionNumber">
+                                <span>Version {{ version.versionNumber }}</span>
+                                <button
+                                    class="btn btn--ghost"
+                                    type="button"
+                                    :disabled="downloadState.loading"
+                                    @click="downloadPdf('documents', version.url, buildFileName('signed', documentIdInput, version.versionNumber))"
+                                >
+                                    Download
+                                </button>
+                            </div>
+                        </div>
                         <pre v-if="documentState.data"><code v-text="prettyJson(documentState.data)"></code></pre>
                         <pre v-if="documentState.versions"><code v-text="prettyJson(documentState.versions)"></code></pre>
                     </article>

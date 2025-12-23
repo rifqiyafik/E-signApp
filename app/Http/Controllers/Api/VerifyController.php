@@ -7,6 +7,7 @@ use App\Models\Document;
 use App\Models\DocumentVersion;
 use App\Models\UserCertificate;
 use App\Services\DocumentPayloadService;
+use App\Services\RootCaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -34,29 +35,182 @@ class VerifyController extends Controller
             ]);
         }
 
-        $payload = $payloadService->build($version->document, $version, $version->tenant_id);
-        $signatureValid = $this->verifyDetachedSignature($version);
+        $responseData = $this->buildVerificationResponse($version->document, $version, $payloadService);
 
-        return response()->json(array_merge([
-            'valid' => true,
-            'signatureValid' => $signatureValid,
-        ], $payload));
+        return response()->json($responseData);
     }
 
-    public function show(string $chainId, int $version, DocumentPayloadService $payloadService): JsonResponse
+    public function show(Request $request, string $chainId, int $version, DocumentPayloadService $payloadService)
     {
         $document = Document::where('chain_id', $chainId)->firstOrFail();
         $versionModel = $document->versions()
             ->where('version_number', $version)
             ->firstOrFail();
 
-        $payload = $payloadService->build($document, $versionModel, $versionModel->tenant_id);
-        $signatureValid = $this->verifyDetachedSignature($versionModel);
+        $responseData = $this->buildVerificationResponse($document, $versionModel, $payloadService);
 
-        return response()->json(array_merge([
+        $acceptHeader = (string) $request->header('accept', '');
+        if (stripos($acceptHeader, 'text/html') !== false) {
+            return view('verify', [
+                'payload' => $responseData,
+                'chainId' => $chainId,
+                'version' => $version,
+            ]);
+        }
+
+        return response()->json($responseData);
+    }
+
+    public function verifyFileForVersion(
+        Request $request,
+        string $chainId,
+        int $version,
+        DocumentPayloadService $payloadService
+    ) {
+        $data = $request->validate([
+            'file' => ['required', 'file', 'mimes:pdf'],
+        ]);
+
+        $file = $data['file'];
+        $hash = hash_file('sha256', $file->getRealPath());
+
+        $document = Document::where('chain_id', $chainId)->firstOrFail();
+        $versionModel = $document->versions()
+            ->where('version_number', $version)
+            ->firstOrFail();
+
+        if ($hash !== $versionModel->signed_pdf_sha256) {
+            $responseData = [
+                'valid' => false,
+                'reason' => 'hash_mismatch',
+                'signedPdfSha256' => $hash,
+                'expectedSignedPdfSha256' => $versionModel->signed_pdf_sha256,
+            ];
+
+            $acceptHeader = (string) $request->header('accept', '');
+            if (stripos($acceptHeader, 'text/html') !== false) {
+                return view('verify', [
+                    'payload' => $responseData,
+                    'chainId' => $chainId,
+                    'version' => $version,
+                ]);
+            }
+
+            return response()->json($responseData);
+        }
+
+        $responseData = $this->buildVerificationResponse($document, $versionModel, $payloadService);
+        $acceptHeader = (string) $request->header('accept', '');
+        if (stripos($acceptHeader, 'text/html') !== false) {
+            return view('verify', [
+                'payload' => $responseData,
+                'chainId' => $chainId,
+                'version' => $version,
+            ]);
+        }
+
+        return response()->json($responseData);
+    }
+
+    private function buildVerificationResponse(Document $document, DocumentVersion $version, DocumentPayloadService $payloadService): array
+    {
+        $payload = $payloadService->build($document, $version, $version->tenant_id);
+        $signatureValid = $this->verifyDetachedSignature($version);
+        $certificateStatus = $this->checkCertificateStatus($version);
+
+        return array_merge([
             'valid' => true,
             'signatureValid' => $signatureValid,
-        ], $payload));
+            'certificateStatus' => $certificateStatus['status'],
+            'rootCaFingerprint' => $certificateStatus['rootCaFingerprint'],
+            'certificateRevokedAt' => $certificateStatus['revokedAt'],
+            'certificateRevokedReason' => $certificateStatus['revokedReason'],
+        ], $payload);
+    }
+
+    private function checkCertificateStatus(DocumentVersion $version): array
+    {
+        $certificate = UserCertificate::where('global_user_id', $version->user_id)->first();
+        if (!$certificate) {
+            return [
+                'status' => 'missing',
+                'rootCaFingerprint' => null,
+                'revokedAt' => null,
+                'revokedReason' => null,
+            ];
+        }
+
+        $rootCa = app(RootCaService::class)->getRootCa();
+        $rootCaFingerprint = $rootCa['fingerprint'] ?? null;
+        $caCert = $rootCa['certificate'] ?? null;
+        $revokedAt = optional($certificate->revoked_at)->toIso8601String();
+        $revokedReason = $certificate->revoked_reason;
+
+        if ($certificate->revoked_at) {
+            return [
+                'status' => 'revoked',
+                'rootCaFingerprint' => $rootCaFingerprint,
+                'revokedAt' => $revokedAt,
+                'revokedReason' => $revokedReason,
+            ];
+        }
+
+        $info = openssl_x509_parse($certificate->certificate) ?: [];
+        $validFrom = $info['validFrom_time_t'] ?? null;
+        $validTo = $info['validTo_time_t'] ?? null;
+        $now = time();
+        if ($validFrom && $now < $validFrom) {
+            return [
+                'status' => 'not_yet_valid',
+                'rootCaFingerprint' => $rootCaFingerprint,
+                'revokedAt' => $revokedAt,
+                'revokedReason' => $revokedReason,
+            ];
+        }
+        if ($validTo && $now > $validTo) {
+            return [
+                'status' => 'expired',
+                'rootCaFingerprint' => $rootCaFingerprint,
+                'revokedAt' => $revokedAt,
+                'revokedReason' => $revokedReason,
+            ];
+        }
+
+        if (!$caCert) {
+            return [
+                'status' => 'untrusted',
+                'rootCaFingerprint' => $rootCaFingerprint,
+                'revokedAt' => $revokedAt,
+                'revokedReason' => $revokedReason,
+            ];
+        }
+
+        $caKey = openssl_pkey_get_public($caCert);
+        if ($caKey === false) {
+            return [
+                'status' => 'untrusted',
+                'rootCaFingerprint' => $rootCaFingerprint,
+                'revokedAt' => $revokedAt,
+                'revokedReason' => $revokedReason,
+            ];
+        }
+
+        $verifyResult = openssl_x509_verify($certificate->certificate, $caKey);
+        if ($verifyResult !== 1) {
+            return [
+                'status' => 'untrusted',
+                'rootCaFingerprint' => $rootCaFingerprint,
+                'revokedAt' => $revokedAt,
+                'revokedReason' => $revokedReason,
+            ];
+        }
+
+        return [
+            'status' => 'valid',
+            'rootCaFingerprint' => $rootCaFingerprint,
+            'revokedAt' => $revokedAt,
+            'revokedReason' => $revokedReason,
+        ];
     }
 
     private function verifyDetachedSignature(DocumentVersion $version): ?bool

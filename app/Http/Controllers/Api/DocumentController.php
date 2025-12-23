@@ -81,6 +81,7 @@ class DocumentController extends Controller
             $signingCredentials = $certificateService->getSigningCredentials($centralUser);
 
             $nextVersionNumber = ($document->versions()->max('version_number') ?? 0) + 1;
+            $signerIndex = ($document->signers()->max('signer_index') ?? 0) + 1;
             $verificationUrl = url("/{$tenantId}/api/verify/{$document->chain_id}/v{$nextVersionNumber}");
             $fileName = 'v' . $nextVersionNumber . '.pdf';
             $relativePath = 'documents/' . $document->id . '/' . $fileName;
@@ -97,6 +98,7 @@ class DocumentController extends Controller
                 [
                     'signed_by' => $user->name,
                     'signed_at' => now()->toIso8601String(),
+                    'signer_index' => $signerIndex,
                 ],
                 [
                     'certificate' => $signingCredentials['certificate'] ?? null,
@@ -163,8 +165,6 @@ class DocumentController extends Controller
                 'user_id' => $user->global_id,
                 'signed_at' => now(),
             ]);
-
-            $signerIndex = ($document->signers()->max('signer_index') ?? 0) + 1;
 
             DocumentSigner::create([
                 'document_id' => $document->id,

@@ -46,6 +46,7 @@ class DocumentStampService
     {
         $certificate = $signature['certificate'] ?? null;
         $privateKey = $signature['privateKey'] ?? null;
+        $extraCerts = $signature['caCertificate'] ?? '';
 
         if (!$certificate || !$privateKey) {
             return;
@@ -54,15 +55,37 @@ class DocumentStampService
         $passphrase = $signature['privateKeyPassphrase'] ?? '';
         $info = $signature['info'] ?? [];
 
-        $pdf->setSignature($certificate, $privateKey, $passphrase, '', 2, $info);
+        $pdf->setSignature($certificate, $privateKey, $passphrase, $extraCerts ?: '', 2, $info);
     }
 
     private function applyStamp(Fpdi $pdf, array $pageSize, string $verificationUrl, array $context): void
     {
         $margin = 10.0;
+        $gap = 6.0;
         $qrSize = min(30.0, max(18.0, $pageSize['width'] * 0.18));
-        $x = $pageSize['width'] - $qrSize - $margin;
-        $y = $pageSize['height'] - $qrSize - $margin;
+        $availableWidth = $pageSize['width'] - ($margin * 2);
+        $columns = (int) floor(($availableWidth + $gap) / ($qrSize + $gap));
+        if ($columns < 1) {
+            $columns = 1;
+        }
+        if ($columns > 2) {
+            $columns = 2;
+        }
+        if ($columns > 1) {
+            $spreadGap = ($availableWidth - ($columns * $qrSize)) / ($columns - 1);
+            if ($spreadGap > $gap) {
+                $gap = $spreadGap;
+            }
+        }
+        $signerIndex = (int) ($context['signer_index'] ?? 1);
+        if ($signerIndex < 1) {
+            $signerIndex = 1;
+        }
+        $slotIndex = $signerIndex - 1;
+        $row = intdiv($slotIndex, $columns);
+        $colFromRight = $slotIndex % $columns;
+        $x = $pageSize['width'] - $margin - $qrSize - ($colFromRight * ($qrSize + $gap));
+        $y = $pageSize['height'] - $margin - $qrSize - ($row * ($qrSize + $gap));
 
         $style = [
             'border' => 0,
@@ -72,21 +95,6 @@ class DocumentStampService
         ];
 
         $pdf->write2DBarcode($verificationUrl, 'QRCODE,H', $x, $y, $qrSize, $qrSize, $style, 'N');
-
-        $lines = ['Verify: ' . $verificationUrl];
-        if (!empty($context['signed_by'])) {
-            $lines[] = 'Signed by: ' . $context['signed_by'];
-        }
-        if (!empty($context['signed_at'])) {
-            $lines[] = 'Signed at: ' . $context['signed_at'];
-        }
-
-        $text = implode("\n", $lines);
-        $textWidth = max(40.0, $x - $margin - 5.0);
-        $textHeight = $qrSize;
-
-        $pdf->SetFont('helvetica', '', 8);
-        $pdf->SetXY($margin, $y);
-        $pdf->MultiCell($textWidth, $textHeight, $text, 0, 'L', false, 1, '', '', true, 0, false, true, $textHeight, 'T', true);
     }
+
 }

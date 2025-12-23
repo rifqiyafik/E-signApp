@@ -36,16 +36,14 @@
 }
 
 html {
-    height: auto; /* Biarkan tinggi menyesuaikan konten */
-    min-height: 100%; /* Minimal setinggi layar */
-    overflow-y: scroll; /* Paksa scrollbar browser utama selalu aktif */
-    overflow-x: hidden;
+    height: auto;
+    min-height: 100%;
 }
 
 body {
     position: relative;
-    min-height: 100vh; /* Body minimal setinggi layar */
-    overflow-y: visible; /* PENTING: Biarkan konten tumpah ke bawah agar html yang menangani scroll */
+    min-height: 100vh;
+    overflow-y: visible;
     overflow-x: hidden;
     margin: 0;
     font-family: var(--body);

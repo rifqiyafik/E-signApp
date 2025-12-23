@@ -6,86 +6,94 @@ download versi, hingga verifikasi dokumen.
 
 ## 1) Overview
 
-- Tenancy: path-based. Semua route tenant berada di `/{tenant}/api`.
-- Tenant identifier: slug terlebih dulu, lalu ID (fallback).
-- Auth: Laravel Passport personal access token per-tenant.
-- Data: tenant/users/certificates/documents disimpan di central DB.
-- Tenant DB: menyimpan `users`, OAuth tables, dan data tenant-specific.
-- Signing pipeline: input PDF -> stamp QR + text -> sign (X.509) -> hash -> simpan versi baru.
+-   Tenancy: path-based. Semua route tenant berada di `/{tenant}/api`.
+-   Tenant identifier: slug terlebih dulu, lalu ID (fallback).
+-   Auth: Laravel Passport personal access token per-tenant.
+-   Data: tenant/users/certificates/documents disimpan di central DB.
+-   Tenant DB: menyimpan `users`, OAuth tables, dan data tenant-specific.
+-   PKI: Root CA internal; sertifikat user diterbitkan oleh CA dan statusnya dicek saat verify (valid/expired/revoked/untrusted).
+-   Signing pipeline: input PDF -> stamp QR (tanpa teks) -> sign (X.509) + embed chain -> hash -> simpan versi baru.
 
 ## 2) Terminologi
 
-- `tenant`: slug atau tenant ID (ULID) di path.
-- `documentId`: ID dokumen.
-- `chainId`: ID rantai dokumen (berubah saat versi baru).
-- `versionNumber`: versi dokumen (mulai dari 1).
+-   `tenant`: slug atau tenant ID (ULID) di path.
+-   `documentId`: ID dokumen.
+-   `chainId`: ID rantai dokumen (berubah saat versi baru).
+-   `versionNumber`: versi dokumen (mulai dari 1).
 
 ## 3) Base URL dan tenant parameter
 
 Base URL format:
-- `http://13.229.151.205/{tenant}/api`
+
+-   `http://13.229.151.205/{tenant}/api`
 
 Contoh:
-- `http://13.229.151.205/nusanett/api` (slug)
-- `http://13.229.151.205/01KCTVRDZ7F51PJHM5C70PK00W/api` (tenant ID)
+
+-   `http://13.229.151.205/nusanett/api` (slug)
+-   `http://13.229.151.205/01KCTVRDZ7F51PJHM5C70PK00W/api` (tenant ID)
 
 Behavior:
-- Tenant tidak ditemukan -> `404`.
-- Tenant DB belum ada -> `500`.
+
+-   Tenant tidak ditemukan -> `404`.
+-   Tenant DB belum ada -> `500`.
 
 ## 4) Auth dan headers
 
 Protected endpoints wajib menyertakan:
-- `Authorization: Bearer {accessToken}`
+
+-   `Authorization: Bearer {accessToken}`
 
 Content type:
-- JSON: `Content-Type: application/json`
-- Upload PDF: `Content-Type: multipart/form-data`
+
+-   JSON: `Content-Type: application/json`
+-   Upload PDF: `Content-Type: multipart/form-data`
 
 Idempotency (sign):
-- Header: `Idempotency-Key: {string}`
-- Atau body `idempotencyKey` (opsional).
+
+-   Header: `Idempotency-Key: {string}`
+-   Atau body `idempotencyKey` (opsional).
 
 ## 5) Local setup (dev)
 
 ### 5.1) Quick start (recommended)
 
-1) Konfigurasi `.env` (DB central).
-2) Jalankan migrasi central:
+1. Konfigurasi `.env` (DB central).
+2. Jalankan migrasi central:
 
 ```powershell
 php artisan migrate
 ```
 
-3) Jalankan server:
+3. Jalankan server:
 
 ```powershell
 php artisan serve --host=127.0.0.1 --port=8000
 ```
 
-4) Buat tenant + user pertama via endpoint central:
+4. Buat tenant + user pertama via endpoint central:
 
 ```
 POST /api/tenants/register
 ```
 
 Endpoint ini otomatis:
-- Membuat tenant.
-- Membuat user central + membership.
-- Membuat tenant user di tenant DB.
-- Memastikan passport keys ada.
-- Membuat personal access client jika belum ada.
-- Mengembalikan accessToken.
+
+-   Membuat tenant.
+-   Membuat user central + membership.
+-   Membuat tenant user di tenant DB.
+-   Memastikan passport keys ada.
+-   Membuat personal access client jika belum ada.
+-   Mengembalikan accessToken.
 
 ### 5.2) Manual provisioning (CLI)
 
-1) Migrasi central:
+1. Migrasi central:
 
 ```powershell
 php artisan migrate
 ```
 
-2) Buat tenant via tinker:
+2. Buat tenant via tinker:
 
 ```powershell
 php artisan tinker
@@ -101,19 +109,19 @@ $tenant = Tenant::create([
 ]);
 ```
 
-3) Migrasi tenant:
+3. Migrasi tenant:
 
 ```powershell
 php artisan tenants:migrate --tenants=demo
 ```
 
-4) Buat passport keys + personal access client di tenant DB:
+4. Buat passport keys + personal access client di tenant DB:
 
 ```powershell
 php artisan tenants:run "passport:install" --tenants=demo --option=force=1 --option=no-interaction=1
 ```
 
-5) (Opsional) Buat tenant user:
+5. (Opsional) Buat tenant user:
 
 ```powershell
 php artisan tinker
@@ -133,22 +141,31 @@ TenantUser::create([
 ## 6) Ringkasan endpoint
 
 Central API:
-- `POST /api/tenants/register`
+
+-   `POST /api/tenants/register`
 
 Tenant public:
-- `GET /{tenant}/api/public/info`
-- `POST /{tenant}/api/auth/register`
-- `POST /{tenant}/api/auth/login`
-- `POST /{tenant}/api/verify`
-- `GET /{tenant}/api/verify/{chainId}/v{version}`
+
+-   `GET /{tenant}/api/public/info`
+-   `POST /{tenant}/api/auth/register`
+-   `POST /{tenant}/api/auth/login`
+-   `POST /{tenant}/api/verify`
+-   `GET /{tenant}/api/verify/{chainId}/v{version}`
+-   `POST /{tenant}/api/verify/{chainId}/v{version}`
+-   `GET /{tenant}/api/pki/root-ca`
 
 Tenant protected:
-- `GET /{tenant}/api/auth/me`
-- `POST /{tenant}/api/documents/sign`
-- `GET /{tenant}/api/documents/{documentId}`
-- `GET /{tenant}/api/documents/{documentId}/versions`
-- `GET /{tenant}/api/documents/{documentId}/versions/latest:download`
-- `GET /{tenant}/api/documents/{documentId}/versions/v{version}:download`
+
+-   `GET /{tenant}/api/auth/me`
+-   `GET /{tenant}/api/pki/certificates/me`
+-   `POST /{tenant}/api/pki/certificates/me/enroll`
+-   `POST /{tenant}/api/pki/certificates/me/renew`
+-   `POST /{tenant}/api/pki/certificates/me/revoke`
+-   `POST /{tenant}/api/documents/sign`
+-   `GET /{tenant}/api/documents/{documentId}`
+-   `GET /{tenant}/api/documents/{documentId}/versions`
+-   `GET /{tenant}/api/documents/{documentId}/versions/latest:download`
+-   `GET /{tenant}/api/documents/{documentId}/versions/v{version}:download`
 
 ## 7) Central API
 
@@ -157,34 +174,37 @@ Tenant protected:
 Buat tenant baru sekaligus user pertama (testing/dev).
 
 Headers:
-- `Content-Type: application/json`
+
+-   `Content-Type: application/json`
 
 Body:
-- `tenantName` (string, required)
-- `tenantSlug` (string, optional, auto-generate jika kosong)
-- `name` (string, required)
-- `email` (string, required)
-- `password` (string, required, min 8)
-- `password_confirmation` (string, required)
-- `role` (string, optional, default: `owner`)
+
+-   `tenantName` (string, required)
+-   `tenantSlug` (string, optional, auto-generate jika kosong)
+-   `name` (string, required)
+-   `email` (string, required)
+-   `password` (string, required, min 8)
+-   `password_confirmation` (string, required)
+-   `role` (string, optional, default: `owner`)
 
 Response:
-- `accessToken`
-- `tenantId`
-- `tenantSlug`
-- `userId`
+
+-   `accessToken`
+-   `tenantId`
+-   `tenantSlug`
+-   `userId`
 
 Example request:
 
 ```json
 {
-  "tenantName": "Demo Company",
-  "tenantSlug": "demo",
-  "name": "Rifqi Yafik",
-  "email": "rifqi@domain.com",
-  "password": "secret123",
-  "password_confirmation": "secret123",
-  "role": "Direktur"
+    "tenantName": "Demo Company",
+    "tenantSlug": "demo",
+    "name": "Rifqi Yafik",
+    "email": "rifqi@domain.com",
+    "password": "secret123",
+    "password_confirmation": "secret123",
+    "role": "Direktur"
 }
 ```
 
@@ -192,268 +212,433 @@ Example response:
 
 ```json
 {
-  "accessToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
-  "tenantId": "01KCTVRDZ7F51PJHM5C70PK00W",
-  "tenantSlug": "demo",
-  "userId": "01KCTVRDNTV8QZDACE56SX1HXG"
+    "accessToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...",
+    "tenantId": "01KCTVRDZ7F51PJHM5C70PK00W",
+    "tenantSlug": "demo",
+    "userId": "01KCTVRDNTV8QZDACE56SX1HXG"
 }
 ```
 
 Notes:
-- Endpoint ini untuk testing/dev. Untuk production sebaiknya pakai flow invitation/approval.
+
+-   Endpoint ini untuk testing/dev. Untuk production sebaiknya pakai flow invitation/approval.
 
 ## 8) Tenant Public API
 
 ### GET /public/info
 
 Response:
-- `tenant` -> `id`, `name`, `slug`
+
+-   `tenant` -> `id`, `name`, `slug`
 
 Example response:
 
 ```json
 {
-  "tenant": {
-    "id": "01KCTVRDZ7F51PJHM5C70PK00W",
-    "name": "Demo Tenant",
-    "slug": "demo"
-  }
+    "tenant": {
+        "id": "01KCTVRDZ7F51PJHM5C70PK00W",
+        "name": "Demo Tenant",
+        "slug": "demo"
+    }
 }
 ```
 
 ### POST /auth/register
 
 Path:
-- `/{tenant}/api/auth/register`
+
+-   `/{tenant}/api/auth/register`
 
 Body:
-- `name` (string, required)
-- `email` (string, required)
-- `password` (string, required, min 8)
-- `password_confirmation` (string, required)
+
+-   `name` (string, required)
+-   `email` (string, required)
+-   `password` (string, required, min 8)
+-   `password_confirmation` (string, required)
 
 Response:
-- `accessToken`
-- `tenantId`
-- `userId`
+
+-   `accessToken`
+-   `tenantId`
+-   `userId`
 
 Notes:
-- Register membuat keypair + X.509 certificate via OpenSSL.
-- Private key disimpan encrypted.
+
+-   Register membuat keypair + X.509 certificate via OpenSSL (ditandatangani Root CA internal).
+-   Private key disimpan encrypted.
 
 ### POST /auth/login
 
 Path:
-- `/{tenant}/api/auth/login`
+
+-   `/{tenant}/api/auth/login`
 
 Body:
-- `email` (string, required)
-- `password` (string, required)
+
+-   `email` (string, required)
+-   `password` (string, required)
 
 Response:
-- `accessToken`
-- `tenantId`
-- `userId`
+
+-   `accessToken`
+-   `tenantId`
+-   `userId`
+
+### GET /pki/root-ca
+
+Path:
+
+-   `/{tenant}/api/pki/root-ca`
+
+Response:
+
+-   `certificate` (PEM)
+-   `fingerprint`
+-   `subject`
+-   `validFrom`
+-   `validTo`
 
 ### POST /verify
 
 Path:
-- `/{tenant}/api/verify`
+
+-   `/{tenant}/api/verify`
 
 Headers:
-- `Content-Type: multipart/form-data`
+
+-   `Content-Type: multipart/form-data`
 
 Body:
-- `file` (PDF, required)
+
+-   `file` (PDF, required)
 
 Response (valid):
-- `valid: true`
-- payload sama seperti sign (lihat section 9)
-- `signatureValid: true | false | null`
+
+-   `valid: true`
+-   payload sama seperti sign (lihat section 9)
+-   `signatureValid: true | false | null`
+-   `certificateStatus: valid | expired | revoked | untrusted | not_yet_valid | missing`
+-   `rootCaFingerprint`
+-   `certificateRevokedAt` (nullable)
+-   `certificateRevokedReason` (nullable)
 
 Response (invalid):
-- `valid: false`
-- `reason: "hash_not_found"`
-- `signedPdfSha256`
+
+-   `valid: false`
+-   `reason: "hash_not_found" | "hash_mismatch"`
+-   `signedPdfSha256`
+-   `expectedSignedPdfSha256` (nullable)
 
 ### GET /verify/{chainId}/v{version}
 
 Path:
-- `/{tenant}/api/verify/{chainId}/v{version}`
+
+-   `/{tenant}/api/verify/{chainId}/v{version}`
 
 Response:
-- `valid: true`
-- payload sama seperti sign
-- `signatureValid: true | false | null`
 
-Endpoint ini adalah `verificationUrl` yang ditanam ke QR.
+-   `valid: true`
+-   payload sama seperti sign
+-   `signatureValid: true | false | null`
+-   `certificateStatus`, `rootCaFingerprint`, `certificateRevokedAt`, `certificateRevokedReason`
+
+Notes:
+
+-   Endpoint ini adalah `verificationUrl` yang ditanam ke QR.
+-   Jika `Accept: text/html`, response berupa halaman verifikasi (bukan JSON).
+
+### POST /verify/{chainId}/v{version}
+
+Path:
+
+-   `/{tenant}/api/verify/{chainId}/v{version}`
+
+Headers:
+
+-   `Content-Type: multipart/form-data`
+
+Body:
+
+-   `file` (PDF, required)
+
+Response (valid):
+
+-   sama seperti `GET /verify/{chainId}/v{version}`
+
+Response (invalid):
+
+-   `valid: false`
+-   `reason: "hash_mismatch"`
+-   `signedPdfSha256` (hash dari file yang diupload)
+-   `expectedSignedPdfSha256` (hash versi asli dari server)
 
 ## 9) Tenant Protected API
 
 ### GET /auth/me
 
 Path:
-- `/{tenant}/api/auth/me`
+
+-   `/{tenant}/api/auth/me`
 
 Response:
-- `profile` -> `userId`, `name`, `email`
-- `tenant` -> `id`, `name`, `slug`
-- `membership` -> `role`, `isOwner`, `joinedAt`
+
+-   `profile` -> `userId`, `name`, `email`
+-   `tenant` -> `id`, `name`, `slug`
+-   `membership` -> `role`, `isOwner`, `joinedAt`
+
+### GET /pki/certificates/me
+
+Path:
+
+-   `/{tenant}/api/pki/certificates/me`
+
+Response:
+
+-   `certificatePem`, `fingerprint`, `serial`, `subject`, `issuer`
+-   `validFrom`, `validTo`
+-   `revokedAt`, `revokedReason`
+
+### POST /pki/certificates/me/enroll
+
+Path:
+
+-   `/{tenant}/api/pki/certificates/me/enroll`
+
+Response:
+
+-   sama seperti `GET /pki/certificates/me`
+
+Notes:
+
+-   Membuat sertifikat baru jika belum ada atau sudah revoked.
+
+### POST /pki/certificates/me/renew
+
+Path:
+
+-   `/{tenant}/api/pki/certificates/me/renew`
+
+Response:
+
+-   sama seperti `GET /pki/certificates/me`
+
+Notes:
+
+-   Rotasi keypair + sertifikat baru (CA-signed).
+
+### POST /pki/certificates/me/revoke
+
+Path:
+
+-   `/{tenant}/api/pki/certificates/me/revoke`
+
+Body (optional):
+
+-   `reason` (string)
+
+Response:
+
+-   sama seperti `GET /pki/certificates/me`
 
 ### POST /documents/sign
 
 Path:
-- `/{tenant}/api/documents/sign`
+
+-   `/{tenant}/api/documents/sign`
 
 Headers:
-- `Authorization: Bearer {accessToken}`
-- `Content-Type: multipart/form-data`
-- Optional: `Idempotency-Key: {string}`
+
+-   `Authorization: Bearer {accessToken}`
+-   `Content-Type: multipart/form-data`
+-   Optional: `Idempotency-Key: {string}`
 
 Body:
-- `file` (PDF, required)
-- `consent` (boolean, required, must be true)
-- `idempotencyKey` (string, optional)
+
+-   `file` (PDF, required)
+-   `consent` (boolean, required, must be true)
+-   `idempotencyKey` (string, optional)
 
 Behavior:
-- Menerima PDF yang sudah pernah ditandatangani.
-- Membuat versi baru dan menambah signer baru.
-- QR + text ditanam di halaman terakhir.
+
+-   Menerima PDF yang sudah pernah ditandatangani.
+-   Membuat versi baru dan menambah signer baru.
+-   QR (tanpa teks) ditanam di halaman terakhir.
+-   Digital signature menyertakan sertifikat user + chain Root CA.
 
 Response:
-- `documentId`
-- `chainId`
-- `versionNumber`
-- `verificationUrl`
-- `signedPdfDownloadUrl`
-- `signedPdfSha256`
-- `signature` (lihat object di bawah)
-- `signers[]` (lihat object di bawah)
+
+-   `documentId`
+-   `chainId`
+-   `versionNumber`
+-   `verificationUrl`
+-   `signedPdfDownloadUrl`
+-   `signedPdfSha256`
+-   `signature` (lihat object di bawah)
+-   `signers[]` (lihat object di bawah)
 
 Example response:
 
 ```json
 {
-  "documentId": "01KCTX...",
-  "chainId": "01KCTY...",
-  "versionNumber": 1,
-  "verificationUrl": "http://127.0.0.1:8000/demo/api/verify/01KCTY.../v1",
-  "signedPdfDownloadUrl": "http://127.0.0.1:8000/demo/api/documents/01KCTX.../versions/v1:download",
-  "signedPdfSha256": "ad8f6b6d4a...",
-  "signature": {
-    "algorithm": "sha256WithRSAEncryption",
-    "certificateFingerprint": "2c8c3b4b...",
-    "certificateSubject": "CN=Test User, emailAddress=test@example.com",
-    "certificateSerial": "1f9a..."
-  },
-  "signers": [
-    {
-      "index": 1,
-      "tenantId": "demo",
-      "userId": "u-001",
-      "name": "Test User",
-      "email": "test@example.com",
-      "role": "Direktur",
-      "signedAt": "2025-12-20T08:52:44+00:00",
-      "certificate": {
-        "serial": "A1B2C3D4",
-        "issuedBy": "CN=Test User, emailAddress=test@example.com, O=E-Signer, C=ID",
-        "validFrom": "2025-01-01",
-        "validTo": "2027-01-01"
-      }
-    }
-  ]
+    "documentId": "01KCTX...",
+    "chainId": "01KCTY...",
+    "versionNumber": 1,
+    "verificationUrl": "http://127.0.0.1:8000/demo/api/verify/01KCTY.../v1",
+    "signedPdfDownloadUrl": "http://127.0.0.1:8000/demo/api/documents/01KCTX.../versions/v1:download",
+    "signedPdfSha256": "ad8f6b6d4a...",
+    "signature": {
+        "algorithm": "sha256WithRSAEncryption",
+        "certificateFingerprint": "2c8c3b4b...",
+        "certificateSubject": "CN=Test User, emailAddress=test@example.com",
+        "certificateSerial": "1f9a..."
+    },
+    "signers": [
+        {
+            "index": 1,
+            "tenantId": "demo",
+            "userId": "u-001",
+            "name": "Test User",
+            "email": "test@example.com",
+            "role": "Direktur",
+            "signedAt": "2025-12-20T08:52:44+00:00",
+            "certificate": {
+                "serial": "A1B2C3D4",
+                "issuedBy": "CN=Test User, emailAddress=test@example.com, O=E-Signer, C=ID",
+                "validFrom": "2025-01-01",
+                "validTo": "2027-01-01"
+            }
+        }
+    ]
 }
 ```
 
 Idempotency:
-- Gunakan `idempotencyKey` atau `Idempotency-Key` untuk mencegah duplicate versi.
+
+-   Gunakan `idempotencyKey` atau `Idempotency-Key` untuk mencegah duplicate versi.
 
 ### GET /documents/{documentId}
 
 Path:
-- `/{tenant}/api/documents/{documentId}`
+
+-   `/{tenant}/api/documents/{documentId}`
 
 Response:
-- `documentId`, `chainId`
-- `latestVersion` -> `versionNumber`, `signedPdfDownloadUrl`, `signedPdfSha256`, `signedAt`
-- `signers[]`
+
+-   `documentId`, `chainId`
+-   `latestVersion` -> `versionNumber`, `signedPdfDownloadUrl`, `signedPdfSha256`, `signedAt`
+-   `signers[]`
 
 ### GET /documents/{documentId}/versions
 
 Path:
-- `/{tenant}/api/documents/{documentId}/versions`
+
+-   `/{tenant}/api/documents/{documentId}/versions`
 
 Response:
-- `documentId`, `chainId`
-- `versions[]` -> `versionNumber`, `signedPdfSha256`, `signedPdfDownloadUrl`, `signedAt`
+
+-   `documentId`, `chainId`
+-   `versions[]` -> `versionNumber`, `signedPdfSha256`, `signedPdfDownloadUrl`, `signedAt`
 
 ### GET /documents/{documentId}/versions/latest:download
 
 Path:
-- `/{tenant}/api/documents/{documentId}/versions/latest:download`
+
+-   `/{tenant}/api/documents/{documentId}/versions/latest:download`
 
 Response:
-- File PDF (versi terbaru)
+
+-   File PDF (versi terbaru)
 
 ### GET /documents/{documentId}/versions/v{version}:download
 
 Path:
-- `/{tenant}/api/documents/{documentId}/versions/v{version}:download`
+
+-   `/{tenant}/api/documents/{documentId}/versions/v{version}:download`
 
 Response:
-- File PDF (versi tertentu)
+
+-   File PDF (versi tertentu)
 
 ## 10) Response object reference
 
 Signature object:
-- `algorithm`
-- `certificateFingerprint`
-- `certificateSubject`
-- `certificateSerial`
+
+-   `algorithm`
+-   `certificateFingerprint`
+-   `certificateSubject`
+-   `certificateSerial`
+
+Verify response extras:
+
+-   `certificateStatus` -> `valid | expired | revoked | untrusted | not_yet_valid | missing`
+-   `rootCaFingerprint`
+-   `certificateRevokedAt` (nullable)
+-   `certificateRevokedReason` (nullable)
+-   `expectedSignedPdfSha256` (nullable, hanya saat `hash_mismatch`)
 
 Signer object:
-- `index` (urutan signer)
-- `tenantId`
-- `userId`
-- `name`
-- `email`
-- `role`
-- `signedAt` (ISO string)
-- `certificate` -> `serial`, `issuedBy`, `validFrom`, `validTo`
+
+-   `index` (urutan signer)
+-   `tenantId`
+-   `userId`
+-   `name`
+-   `email`
+-   `role`
+-   `signedAt` (ISO string)
+-   `certificate` -> `serial`, `issuedBy`, `validFrom`, `validTo`
 
 Notes:
-- Field signature dapat bernilai `null` untuk versi lama yang belum menyimpan metadata.
+
+-   Field signature dapat bernilai `null` untuk versi lama yang belum menyimpan metadata.
+
+UserCertificateResponse object:
+
+-   `certificatePem`
+-   `fingerprint`
+-   `serial`
+-   `subject`
+-   `issuer`
+-   `validFrom`, `validTo`
+-   `revokedAt` (nullable)
+-   `revokedReason` (nullable)
 
 ## 11) Error responses (umum)
 
 Laravel default error format:
-- `422 Unprocessable Entity` -> `{ "message": "...", "errors": { "field": ["..."] } }`
-- `401 Unauthorized` -> `{ "message": "Unauthenticated." }`
-- `404 Not Found` -> `{ "message": "Not Found." }`
-- `409 Conflict` -> `{ "message": "Email already registered. Please login." }`
-- `500 Internal Server Error` -> `{ "message": "Server Error" }`
+
+-   `422 Unprocessable Entity` -> `{ "message": "...", "errors": { "field": ["..."] } }`
+-   `401 Unauthorized` -> `{ "message": "Unauthenticated." }`
+-   `404 Not Found` -> `{ "message": "Not Found." }`
+-   `409 Conflict` -> `{ "message": "Email already registered. Please login." }`
+-   `500 Internal Server Error` -> `{ "message": "Server Error" }`
 
 ## 12) Example flow (ringkas)
 
-1) Central register tenant:
-- `POST /api/tenants/register` -> simpan `tenantSlug` + `accessToken`.
+1. Central register tenant:
 
-2) Sign document:
-- `POST /{tenant}/api/documents/sign` (Bearer token, multipart PDF)
+-   `POST /api/tenants/register` -> simpan `tenantSlug` + `accessToken`.
 
-3) Share QR:
-- `verificationUrl` dari response sign.
+2. Sign document:
 
-4) Verify:
-- `POST /{tenant}/api/verify` (upload PDF)
-- atau akses `GET /{tenant}/api/verify/{chainId}/v{version}`
+-   `POST /{tenant}/api/documents/sign` (Bearer token, multipart PDF)
+
+3. Share QR:
+
+-   `verificationUrl` dari response sign.
+
+4. Verify:
+
+-   `POST /{tenant}/api/verify` (upload PDF)
+-   atau akses `GET /{tenant}/api/verify/{chainId}/v{version}`
+-   jika ingin cross-check file dengan QR: `POST /{tenant}/api/verify/{chainId}/v{version}` + upload PDF
 
 ## 13) Multi-signer note
 
 Endpoint sign menerima PDF yang sudah ditandatangani dan menambah signer baru:
-- `signers[]` bertambah.
-- `versionNumber` naik.
-- `verificationUrl` baru untuk versi terbaru.
+
+-   `signers[]` bertambah.
+-   `versionNumber` naik.
+-   `verificationUrl` baru untuk versi terbaru.
+-   QR ditanam tanpa teks (visual stamp hanya QR).
 
 Hash selalu dihitung dari PDF hasil render (stamped), bukan file asli.

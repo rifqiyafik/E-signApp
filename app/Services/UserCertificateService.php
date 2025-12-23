@@ -12,13 +12,40 @@ class UserCertificateService
 {
     public function ensureForUser(User $user): UserCertificate
     {
-        $existing = UserCertificate::where('global_user_id', $user->global_id)->first();
+        $existing = $this->getForUser($user);
 
-        if ($existing) {
+        if ($existing && !$existing->revoked_at) {
             return $existing;
         }
 
-        return $this->generateForUser($user);
+        return $this->issueCertificate($user, $existing);
+    }
+
+    public function getForUser(User $user): ?UserCertificate
+    {
+        return UserCertificate::where('global_user_id', $user->global_id)->first();
+    }
+
+    public function renewForUser(User $user): UserCertificate
+    {
+        $existing = $this->getForUser($user);
+
+        return $this->issueCertificate($user, $existing);
+    }
+
+    public function revokeForUser(User $user, ?string $reason = null): UserCertificate
+    {
+        $certificate = $this->getForUser($user);
+
+        if (!$certificate) {
+            throw new \RuntimeException('Certificate not found.');
+        }
+
+        $certificate->revoked_at = now();
+        $certificate->revoked_reason = $reason ? trim($reason) : null;
+        $certificate->save();
+
+        return $certificate;
     }
 
     public function getOpenSslConfigPath(): ?string
@@ -29,6 +56,7 @@ class UserCertificateService
     public function getSigningCredentials(User $user): array
     {
         $certificate = $this->ensureForUser($user);
+        $rootCa = app(RootCaService::class)->getRootCa();
 
         $privateKey = Crypt::decryptString($certificate->private_key_encrypted);
         $passphrase = $certificate->private_key_passphrase_encrypted
@@ -44,10 +72,11 @@ class UserCertificateService
             'certificateSubject' => $certificate->certificate_subject,
             'certificateSerial' => $certificate->certificate_serial,
             'signatureAlgorithm' => $certificate->signature_algorithm,
+            'caCertificate' => $rootCa['certificate'] ?? null,
         ];
     }
 
-    private function generateForUser(User $user): UserCertificate
+    private function issueCertificate(User $user, ?UserCertificate $existing = null): UserCertificate
     {
         $opensslConfig = $this->resolveOpenSslConfig();
         $privateKeyConfig = [
@@ -112,7 +141,18 @@ class UserCertificateService
             $certOptions['config'] = $opensslConfig;
         }
 
-        $certificate = openssl_csr_sign($csr, null, $privateKey, 365, $certOptions);
+        $rootCa = app(RootCaService::class)->getRootCa();
+        $caCert = $rootCa['certificate'] ?? null;
+        $caKeyPem = $rootCa['privateKey'] ?? null;
+        $caKey = $caKeyPem ? openssl_pkey_get_private($caKeyPem) : null;
+
+        if ($caKey === false) {
+            throw new \RuntimeException('Failed to load Root CA key.' . $this->getOpenSslError());
+        }
+
+        $certificate = $caCert && $caKey
+            ? openssl_csr_sign($csr, $caCert, $caKey, 365, $certOptions)
+            : openssl_csr_sign($csr, null, $privateKey, 365, $certOptions);
 
         if ($certificate === false) {
             throw new \RuntimeException('Failed to generate X.509 certificate.' . $this->getOpenSslError());
@@ -138,8 +178,7 @@ class UserCertificateService
             ? Carbon::createFromTimestamp($certificateInfo['validTo_time_t'])
             : null;
 
-        return UserCertificate::create([
-            'global_user_id' => $user->global_id,
+        $payload = [
             'public_key' => $publicKeyPem,
             'certificate' => $certificatePem,
             'certificate_fingerprint' => hash('sha256', $certificatePem),
@@ -148,11 +187,24 @@ class UserCertificateService
             'certificate_issuer' => $this->formatCertificateName($certificateInfo['issuer'] ?? null),
             'valid_from' => $validFrom,
             'valid_to' => $validTo,
+            'revoked_at' => null,
+            'revoked_reason' => null,
             'private_key_encrypted' => Crypt::encryptString($privateKeyPem),
             'private_key_passphrase_encrypted' => $passphrase ? Crypt::encryptString($passphrase) : null,
             'key_algorithm' => 'RSA',
             'signature_algorithm' => $certificateInfo['signatureTypeLN'] ?? 'sha256WithRSAEncryption',
-        ]);
+        ];
+
+        if ($existing) {
+            $existing->fill($payload);
+            $existing->save();
+
+            return $existing->fresh();
+        }
+
+        return UserCertificate::create(array_merge([
+            'global_user_id' => $user->global_id,
+        ], $payload));
     }
 
 
