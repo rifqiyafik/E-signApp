@@ -15,6 +15,10 @@ Route::get('/login', function () {
     return Inertia::render('Auth/Login');
 })->name('login');
 
+Route::get('/register', function () {
+    return Inertia::render('Auth/Register');
+})->name('register');
+
 Route::get('/sign', function () {
     return Inertia::render('Sign');
 })->name('sign');
