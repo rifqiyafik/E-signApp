@@ -1,4 +1,6 @@
 <script setup>
+import { computed } from "vue";
+
 const props = defineProps({
     show: {
         type: Boolean,
@@ -15,6 +17,47 @@ const emit = defineEmits(["close"]);
 const close = () => {
     emit("close");
 };
+
+const statusLabel = computed(() =>
+    props.result?.isValid ? "VALID" : "TIDAK VALID"
+);
+
+const formatStatus = (value) => {
+    if (value === true) {
+        return "VALID";
+    }
+    if (value === false) {
+        return "INVALID";
+    }
+    if (value === null || value === undefined || value === "") {
+        return "-";
+    }
+
+    const text = String(value).replace(/_/g, " ");
+    return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
+const signatureStatus = computed(() =>
+    formatStatus(props.result?.isValidSignature)
+);
+const certificateStatus = computed(() =>
+    formatStatus(props.result?.certificateStatus)
+);
+const tsaStatus = computed(() => formatStatus(props.result?.tsaStatus));
+const ltvStatus = computed(() => formatStatus(props.result?.ltvStatus));
+
+const versionLabel = computed(() => {
+    const version = props.result?.versionNumber;
+    return version ? `v${version}` : "-";
+});
+
+const fileLabel = computed(
+    () => props.result?.originalFileName || props.result?.fileName || "-"
+);
+
+const signerList = computed(() =>
+    Array.isArray(props.result?.signers) ? props.result.signers : []
+);
 </script>
 
 <template>
@@ -24,7 +67,7 @@ const close = () => {
         @click.self="close"
     >
         <div
-            class="bg-white rounded-xl shadow-2xl max-w-md w-full p-8 relative animate-bounce-in"
+            class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 relative animate-bounce-in max-h-[90vh] overflow-y-auto"
         >
             <button
                 @click="close"
@@ -45,131 +88,146 @@ const close = () => {
                 </svg>
             </button>
 
-            <div v-if="result?.isValid" class="text-center">
-                <div
-                    class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4"
-                >
-                    <svg
-                        class="h-10 w-10 text-green-600"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
+            <div class="text-left">
+                <div class="flex items-start gap-3">
+                    <div
+                        class="flex h-11 w-11 items-center justify-center rounded-full"
+                        :class="
+                            result?.isValid
+                                ? 'bg-green-100 text-green-600'
+                                : 'bg-red-100 text-red-600'
+                        "
                     >
-                        <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                        />
-                    </svg>
-                </div>
-                <h3 class="text-2xl font-bold text-gray-900 mb-2">
-                    Dokumen Asli
-                </h3>
-                <p class="text-gray-600 mb-6">
-                    {{ result.message }}
-                </p>
-
-                <div class="bg-gray-50 rounded-lg p-4 text-left space-y-3">
-                    <div class="border-b border-gray-200 pb-3">
-                        <p class="text-xs text-gray-500 uppercase">
-                            Penandatangan
-                        </p>
-                        <p class="font-semibold text-gray-900">
-                            {{ result.signerName }}
-                        </p>
-                        <p class="text-sm text-gray-600">
-                            {{ result.signerEmail }}
-                        </p>
+                        <svg
+                            v-if="result?.isValid"
+                            class="h-6 w-6"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <svg
+                            v-else
+                            class="h-6 w-6"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12"
+                            />
+                        </svg>
                     </div>
-
-                    <div class="border-b border-gray-200 pb-3">
-                        <p class="text-xs text-gray-500 uppercase">
-                            Tanggal Ditandatangani
-                        </p>
-                        <p class="font-medium text-gray-900">
-                            {{ result.signedDate }}
-                        </p>
-                    </div>
-
-                    <div class="border-b border-gray-200 pb-3">
-                        <p class="text-xs text-gray-500 uppercase">
-                            Nama File Asli
-                        </p>
-                        <p class="font-medium text-gray-900 text-sm">
-                            {{ result.originalFileName }}
-                        </p>
-                    </div>
-
-                    <div>
-                        <p class="text-xs text-gray-500 uppercase">
-                            Informasi File
-                        </p>
-                        <p class="text-sm text-gray-900">
-                            {{ result.fileName }}
-                        </p>
-                        <p class="text-sm text-gray-600">
-                            {{ result.fileSize }}
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-lg font-bold text-gray-900">
+                                Verifikasi Dokumen
+                            </h3>
+                            <span
+                                class="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                                :class="
+                                    result?.isValid
+                                        ? 'bg-green-100 text-green-700'
+                                        : 'bg-red-100 text-red-700'
+                                "
+                            >
+                                {{ statusLabel }}
+                            </span>
+                        </div>
+                        <p class="text-sm text-gray-600 mt-1">
+                            {{ result?.message }}
                         </p>
                     </div>
                 </div>
-            </div>
 
-            <div v-else class="text-center">
-                <div
-                    class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-100 mb-4"
-                >
-                    <svg
-                        class="h-10 w-10 text-red-600"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M6 18L18 6M6 6l12 12"
-                        />
-                    </svg>
-                </div>
-                <h3 class="text-2xl font-bold text-gray-900 mb-2">
-                    Dokumen Tidak Valid
-                </h3>
-                <p class="text-gray-600 mb-6">
-                    {{ result?.message }}
-                </p>
-
-                <div class="bg-gray-50 rounded-lg p-4 text-left space-y-3">
-                    <div>
-                        <p class="text-xs text-gray-500 uppercase">
-                            Informasi File
-                        </p>
-                        <p class="text-sm text-gray-900">
-                            {{ result?.fileName }}
-                        </p>
-                        <p class="text-sm text-gray-600">
-                            {{ result?.fileSize }}
-                        </p>
+                <div class="mt-4 bg-gray-50 rounded-xl p-4 text-sm space-y-2">
+                    <div class="flex items-start justify-between gap-4">
+                        <span class="text-gray-500">File</span>
+                        <span class="text-right text-gray-900 break-words">
+                            {{ fileLabel }}
+                        </span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-500">Versi</span>
+                        <span class="font-medium text-gray-900">
+                            {{ versionLabel }}
+                        </span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-500">Signature</span>
+                        <span class="font-medium text-gray-900">
+                            {{ signatureStatus }}
+                        </span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-500">Sertifikat</span>
+                        <span class="font-medium text-gray-900">
+                            {{ certificateStatus }}
+                        </span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-500">TSA</span>
+                        <span class="font-medium text-gray-900">
+                            {{ tsaStatus }}
+                        </span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-500">LTV</span>
+                        <span class="font-medium text-gray-900">
+                            {{ ltvStatus }}
+                        </span>
                     </div>
                 </div>
 
                 <div
-                    class="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4"
+                    class="mt-4 rounded-xl border border-[#e6e0f7] bg-[#f7f4ff] p-4"
                 >
-                    <p class="text-sm text-yellow-800">
-                        <strong>Catatan:</strong> Dokumen ini mungkin belum
-                        ditandatangani atau tanda tangan digitalnya telah
-                        dimodifikasi.
+                    <p class="text-xs font-semibold text-[#6a4cc0] uppercase">
+                        Penandatangan
+                    </p>
+                    <div v-if="signerList.length" class="mt-3 space-y-3">
+                        <div
+                            v-for="(signer, index) in signerList"
+                            :key="signer.userId || signer.email || index"
+                            class="flex items-center gap-3"
+                        >
+                            <span
+                                class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#ebe5fb] text-[#6a4cc0] text-xs font-semibold"
+                            >
+                                {{ signer.index ?? index + 1 }}
+                            </span>
+                            <div class="min-w-0">
+                                <p
+                                    class="text-sm font-semibold text-gray-900 truncate"
+                                >
+                                    {{ signer.name || "Tidak diketahui" }}
+                                </p>
+                                <p class="text-xs text-gray-500 truncate">
+                                    {{ signer.email || "-" }}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <p v-else class="mt-2 text-xs text-gray-500">
+                        Belum ada data penandatangan.
                     </p>
                 </div>
             </div>
 
             <button
                 @click="close"
-                class="mt-6 w-full px-6 py-3 bg-[#13087d] text-white rounded-full hover:bg-blue-900 font-medium transition-colors shadow-lg"
+                class="mt-6 w-full px-6 py-2.5 bg-[#6a4cc0] text-white rounded-full hover:bg-[#5a3fb3] font-medium transition-colors shadow-lg"
             >
-                Tutup
+                OK
             </button>
         </div>
     </div>

@@ -105,6 +105,32 @@ const resolveVerifyMessage = (data) => {
     return "Dokumen tidak valid atau belum ditandatangani.";
 };
 
+const buildQrPayload = (data) => {
+    if (!data) {
+        return "";
+    }
+
+    const payload = {
+        documentId: data.documentId ?? null,
+        chainId: data.chainId ?? null,
+        versionNumber: data.versionNumber ?? null,
+        verificationUrl: data.verificationUrl ?? null,
+        signedPdfSha256: data.signedPdfSha256 ?? null,
+        signature: data.signature ?? null,
+        tsa: data.tsa ?? null,
+        ltv: data.ltv ?? null,
+        signers: Array.isArray(data.signers) ? data.signers : [],
+    };
+
+    const json = JSON.stringify(payload);
+    try {
+        return btoa(json);
+    } catch (error) {
+        console.warn("Failed to encode QR payload", error);
+        return json;
+    }
+};
+
 const triggerFileInput = () => {
     fileInput.value?.click();
 };
@@ -179,13 +205,24 @@ const handleSign = async () => {
         signResult.value = response.data || null;
         isSigned.value = true;
 
-        if (signResult.value?.verificationUrl) {
-            qrCodeUrl.value = await QRCode.toDataURL(
-                signResult.value.verificationUrl,
-                {
+        if (signResult.value) {
+            const qrPayload = buildQrPayload(signResult.value);
+
+            try {
+                qrCodeUrl.value = await QRCode.toDataURL(qrPayload, {
                     errorCorrectionLevel: "H",
+                });
+            } catch (error) {
+                console.warn("QR payload too large, fallback to URL", error);
+                if (signResult.value?.verificationUrl) {
+                    qrCodeUrl.value = await QRCode.toDataURL(
+                        signResult.value.verificationUrl,
+                        {
+                            errorCorrectionLevel: "H",
+                        }
+                    );
                 }
-            );
+            }
         }
 
         if (signResult.value?.signedPdfDownloadUrl) {
@@ -317,9 +354,29 @@ const handleVerify = async () => {
                     "Dokumen asli dan telah ditandatangani secara digital.",
                 signerName: latestSigner?.name || "Tidak diketahui",
                 signerEmail: latestSigner?.email || "-",
+                signers,
                 originalFileName: fileMeta.fileName,
                 signedDate: formatSignedDate(latestSigner?.signedAt),
                 isValidSignature: data.signatureValid ?? null,
+                certificateStatus: data.certificateStatus ?? "-",
+                certificateRevokedAt: data.certificateRevokedAt ?? null,
+                certificateRevokedReason: data.certificateRevokedReason ?? null,
+                tsaStatus: data.tsaStatus ?? null,
+                tsaSignedAt: formatSignedDate(
+                    data.tsaSignedAt ?? data.tsa?.signedAt
+                ),
+                ltvStatus:
+                    data.ltvStatus ??
+                    (data.ltv?.enabled === true
+                        ? "ready"
+                        : data.ltv?.enabled === false
+                        ? "disabled"
+                        : null),
+                ltvGeneratedAt: formatSignedDate(
+                    data.ltvGeneratedAt ?? data.ltv?.generatedAt
+                ),
+                ltvIssues: Array.isArray(data.ltvIssues) ? data.ltvIssues : [],
+                versionNumber: data.versionNumber ?? null,
                 ...fileMeta,
             };
         } else {
