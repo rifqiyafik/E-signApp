@@ -1,5 +1,14 @@
 <script setup>
 import { Link } from "@inertiajs/vue3";
+
+const scrollToFeatures = () => {
+    const target = document.getElementById("features");
+    if (!target) {
+        return;
+    }
+
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+};
 </script>
 
 <template>
@@ -24,17 +33,18 @@ import { Link } from "@inertiajs/vue3";
 
             <div class="flex flex-col sm:flex-row gap-4 mt-4">
                 <Link
-                    href="/"
+                    href="/sign"
                     class="inline-flex justify-center items-center bg-[#13087d] hover:bg-[#190b9f] text-white rounded-full shadow-lg hover:shadow-xl px-8 py-3 text-base font-bold transition-all duration-300 transform hover:-translate-y-1"
                 >
                     Mulai Sekarang
                 </Link>
-                <Link
-                    href="/"
+                <button
+                    type="button"
+                    @click="scrollToFeatures"
                     class="inline-flex justify-center items-center bg-white border-2 border-[#13087d] text-[#13087d] hover:bg-gray-50 rounded-full shadow-md hover:shadow-lg px-8 py-3 text-base font-bold transition-all duration-300 transform hover:-translate-y-1"
                 >
                     Pelajari Fitur
-                </Link>
+                </button>
             </div>
 
             <div

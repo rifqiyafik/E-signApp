@@ -20,7 +20,9 @@
         "jsqr": "^1.4.0",
         "pdf-lib": "^1.17.1",
         "qrcode": "^1.5.4",
+        "toastify-js": "^1.12.0",
         "vue": "^3.5.26",
-        "vue-pdf-embed": "^2.1.3"
+        "vue-pdf-embed": "^2.1.3",
+        "vue3-toastify": "^0.2.8"
     }
 }

@@ -1,6 +1,10 @@
 <script setup>
 import { onMounted, ref } from "vue";
 
+defineOptions({
+    inheritAttrs: false,
+});
+
 defineProps({
     modelValue: {
         type: String,
@@ -27,15 +31,16 @@ defineExpose({ focus: () => input.value.focus() });
 
 <template>
     <div class="flex flex-col gap-0.5">
-        <label class="block font-semibold text-sm text-gray-900">
+        <label class="block font-semibold text-sm text-gray-900" :for="$attrs.id">
             <span v-if="labelValue">{{ labelValue }}</span>
             <span v-else><slot /></span>
-            <span v-if="required" class="text-red-500">*</span>
+            <span v-if="$attrs.required" class="text-red-500">*</span>
         </label>
 
         <input
             ref="input"
             class="border-[#13087d] border-2 text-gray-900 rounded-xl px-3 py-1.5 text-base shadow-sm focus:outline-none"
+            v-bind="$attrs"
             :value="modelValue"
             @input="$emit('update:modelValue', $event.target.value)"
         />

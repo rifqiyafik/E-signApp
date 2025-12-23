@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed } from "vue";
 import { usePage } from "@inertiajs/vue3";
+import axios from "axios";
 import QRCode from "qrcode";
 import VuePdfEmbed from "vue-pdf-embed";
-import { PDFDocument, rgb } from "pdf-lib";
 import VerificationModal from "@/Components/Sign/VerificationModal.vue";
 
 import "vue-pdf-embed/dist/styles/textLayer.css";
@@ -13,8 +13,11 @@ const activeTab = ref("sign");
 const fileInput = ref(null);
 const selectedFile = ref(null);
 const isSigned = ref(false);
+const isSigning = ref(false);
 const pdfUrl = ref(null);
 const qrCodeUrl = ref(null);
+const signResult = ref(null);
+const signError = ref("");
 
 const verifyFileInput = ref(null);
 const verifyFile = ref(null);
@@ -25,199 +28,238 @@ const showVerificationModal = ref(false);
 const user = computed(() => usePage().props?.auth?.user || null);
 
 const signerName = computed(() => user.value?.name || "Pengguna");
-const signerEmail = computed(() => user.value?.email || "user@example.com");
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(
+    /\/+$/,
+    ""
+);
+const STORAGE_KEY = "esign_auth";
+
+const getAuthData = () => {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(stored);
+    } catch (error) {
+        console.warn("Invalid auth data in localStorage", error);
+        return null;
+    }
+};
+
+const getIdempotencyKey = () => {
+    if (window.crypto?.randomUUID) {
+        return window.crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const formatFileInfo = (file) => {
+    if (!file) {
+        return { fileName: "-", fileSize: "-" };
+    }
+
+    return {
+        fileName: file.name,
+        fileSize: `${(file.size / 1024).toFixed(2)} KB`,
+    };
+};
+
+const formatSignedDate = (value) => {
+    if (!value) {
+        return "-";
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return "-";
+    }
+
+    return date.toLocaleString("id-ID");
+};
+
+const resolveVerifyMessage = (data) => {
+    if (data?.message) {
+        return data.message;
+    }
+
+    if (data?.reason === "hash_not_found") {
+        return "Dokumen tidak ditemukan di sistem verifikasi.";
+    }
+
+    return "Dokumen tidak valid atau belum ditandatangani.";
+};
 
 const triggerFileInput = () => {
-    fileInput.value.click();
+    fileInput.value?.click();
 };
 
 const handleFileSelect = (event) => {
-    const file = event.target.files[0];
-    processFile(file);
+    const file = event.target?.files?.[0];
+    if (!file || file.type !== "application/pdf") {
+        return;
+    }
+
+    selectedFile.value = file;
+    isSigned.value = false;
+    isSigning.value = false;
+    signResult.value = null;
+    signError.value = "";
+    qrCodeUrl.value = null;
+    if (pdfUrl.value) {
+        URL.revokeObjectURL(pdfUrl.value);
+    }
+    pdfUrl.value = URL.createObjectURL(file);
 };
 
 const handleDrop = (event) => {
     event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    processFile(file);
-};
-
-<<<<<<< HEAD
-// comment
-
-=======
->>>>>>> main
-const processFile = (file) => {
-    if (file && file.type === "application/pdf") {
-        selectedFile.value = file;
-        isSigned.value = false;
-        qrCodeUrl.value = null;
-        if (pdfUrl.value) URL.revokeObjectURL(pdfUrl.value);
-        pdfUrl.value = URL.createObjectURL(file);
+    const file = event.dataTransfer?.files?.[0];
+    if (!file || file.type !== "application/pdf") {
+        return;
     }
+
+    selectedFile.value = file;
+    isSigned.value = false;
+    isSigning.value = false;
+    signResult.value = null;
+    signError.value = "";
+    qrCodeUrl.value = null;
+    if (pdfUrl.value) {
+        URL.revokeObjectURL(pdfUrl.value);
+    }
+    pdfUrl.value = URL.createObjectURL(file);
 };
 
 const handleSign = async () => {
-    try {
-        const signatureData = JSON.stringify({
-            name: signerName.value,
-            email: signerEmail.value,
-            file: selectedFile.value.name,
-            date: new Date().toISOString(),
-            valid: true,
-        });
+    if (!selectedFile.value) {
+        return;
+    }
 
-        qrCodeUrl.value = await QRCode.toDataURL(signatureData, {
-            errorCorrectionLevel: "H",
-        });
+    const authData = getAuthData();
+    if (!authData?.accessToken || !authData?.tenant) {
+        signError.value = "Silakan login terlebih dahulu.";
+        return;
+    }
+
+    signError.value = "";
+    isSigning.value = true;
+
+    try {
+        const formData = new FormData();
+        formData.append("file", selectedFile.value);
+        formData.append("consent", "true");
+        formData.append("idempotencyKey", getIdempotencyKey());
+
+        const response = await axios.post(
+            `${API_BASE_URL}/${authData.tenant}/api/documents/sign`,
+            formData,
+            {
+                headers: {
+                    Authorization: `Bearer ${authData.accessToken}`,
+                },
+            }
+        );
+
+        signResult.value = response.data || null;
         isSigned.value = true;
-    } catch (err) {
-        console.error("Error generating QR code", err);
+
+        if (signResult.value?.verificationUrl) {
+            qrCodeUrl.value = await QRCode.toDataURL(
+                signResult.value.verificationUrl,
+                {
+                    errorCorrectionLevel: "H",
+                }
+            );
+        }
+
+        if (signResult.value?.signedPdfDownloadUrl) {
+            const signedResponse = await axios.get(
+                signResult.value.signedPdfDownloadUrl,
+                {
+                    responseType: "blob",
+                    headers: {
+                        Authorization: `Bearer ${authData.accessToken}`,
+                    },
+                }
+            );
+
+            if (pdfUrl.value) {
+                URL.revokeObjectURL(pdfUrl.value);
+            }
+            pdfUrl.value = URL.createObjectURL(signedResponse.data);
+        }
+    } catch (error) {
+        console.error("Error signing document", error);
+        signError.value =
+            error?.response?.data?.message || "Gagal menandatangani dokumen.";
+        isSigned.value = false;
+    } finally {
+        isSigning.value = false;
     }
 };
 
 const handleSave = async () => {
-    if (!selectedFile.value || !qrCodeUrl.value) {
-        console.error("Missing required data:", {
-            hasFile: !!selectedFile.value,
-            hasQR: !!qrCodeUrl.value,
-        });
+    if (!signResult.value?.signedPdfDownloadUrl) {
+        signError.value = "Dokumen belum ditandatangani.";
         return;
     }
 
+    const authData = getAuthData();
+    if (!authData?.accessToken) {
+        signError.value = "Silakan login terlebih dahulu.";
+        return;
+    }
+
+    signError.value = "";
+
     try {
-        const arrayBuffer = await selectedFile.value.arrayBuffer();
-        const pdfDoc = await PDFDocument.load(arrayBuffer);
-
-        const signatureMetadata = JSON.stringify({
-            name: signerName.value,
-            email: signerEmail.value,
-            file: selectedFile.value.name,
-            date: new Date().toISOString(),
-            valid: true,
-        });
-
-        pdfDoc.setTitle(`ESIGN_DATA:${signatureMetadata}`);
-        pdfDoc.setSubject("Digitally Signed Document");
-        pdfDoc.setKeywords([`ESIGN_DATA:${signatureMetadata}`]);
-
-        const pages = pdfDoc.getPages();
-        const lastPage = pages[pages.length - 1];
-        const { width, height } = lastPage.getSize();
-
-        const qrImageBytes = await fetch(qrCodeUrl.value).then((res) =>
-            res.arrayBuffer()
+        const response = await axios.get(
+            signResult.value.signedPdfDownloadUrl,
+            {
+                responseType: "blob",
+                headers: {
+                    Authorization: `Bearer ${authData.accessToken}`,
+                },
+            }
         );
-        const qrImage = await pdfDoc.embedPng(qrImageBytes);
 
-        const qrSize = 80;
-        const margin = 30;
-        const qrX = width - qrSize - margin;
-        const qrY = margin;
-        lastPage.drawImage(qrImage, {
-            x: qrX,
-            y: qrY,
-            width: qrSize,
-            height: qrSize,
-        });
-
-        const fontSize = 8;
-        const textX = qrX;
-        const textY = qrY + qrSize + 5;
-
-        const signedText = "DIGITALLY SIGNED";
-        const nameText = signerName.value || "Unknown Signer";
-        const dateText = new Date().toLocaleDateString("id-ID");
-
-        lastPage.drawText(signedText, {
-            x: textX,
-            y: textY,
-            size: fontSize,
-            color: rgb(0.07, 0.03, 0.49),
-        });
-
-        lastPage.drawText(nameText, {
-            x: textX,
-            y: textY - 10,
-            size: fontSize - 1,
-            color: rgb(0.4, 0.4, 0.4),
-        });
-
-        lastPage.drawText(dateText, {
-            x: textX,
-            y: textY - 20,
-            size: fontSize - 1,
-            color: rgb(0.5, 0.5, 0.5),
-        });
-
-        const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([pdfBytes], { type: "application/pdf" });
-        const url = URL.createObjectURL(blob);
-
+        const url = URL.createObjectURL(response.data);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `signed-${selectedFile.value.name}`;
+        link.download = selectedFile.value
+            ? `signed-${selectedFile.value.name}`
+            : "signed-document.pdf";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-
         URL.revokeObjectURL(url);
     } catch (error) {
-        console.error("Error saving signed PDF:", error);
-        console.error("Error details:", {
-            message: error.message,
-            stack: error.stack,
-        });
+        console.error("Error downloading signed PDF:", error);
+        signError.value =
+            error?.response?.data?.message || "Gagal mengunduh dokumen.";
     }
 };
 
 const triggerVerifyFileInput = () => {
-    verifyFileInput.value.click();
+    verifyFileInput.value?.click();
 };
 
 const handleVerifyFileSelect = (event) => {
-    const file = event.target.files[0];
-    if (file && file.type === "application/pdf") {
+    const file = event.target?.files?.[0];
+    if (file?.type === "application/pdf") {
         verifyFile.value = file;
     }
 };
 
 const handleVerifyDrop = (event) => {
     event.preventDefault();
-    const file = event.dataTransfer.files[0];
-    if (file && file.type === "application/pdf") {
+    const file = event.dataTransfer?.files?.[0];
+    if (file?.type === "application/pdf") {
         verifyFile.value = file;
-    }
-};
-
-const extractQRFromPDF = async (file) => {
-    try {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdfDoc = await PDFDocument.load(arrayBuffer);
-
-        const title = pdfDoc.getTitle();
-        const keywordsArray = pdfDoc.getKeywords();
-        const subject = pdfDoc.getSubject();
-
-        const keywords = Array.isArray(keywordsArray)
-            ? keywordsArray.join(" ")
-            : keywordsArray;
-
-        if (title && title.startsWith("ESIGN_DATA:")) {
-            const signatureData = title.replace("ESIGN_DATA:", "");
-            return signatureData;
-        }
-
-        if (keywords && keywords.startsWith("ESIGN_DATA:")) {
-            const signatureData = keywords.replace("ESIGN_DATA:", "");
-            return signatureData;
-        }
-
-        console.warn("No ESIGN_DATA found in any metadata field");
-        return null;
-    } catch (error) {
-        console.error("Error extracting signature from PDF:", error);
-        throw error;
     }
 };
 
@@ -226,51 +268,66 @@ const handleVerify = async () => {
         return;
     }
 
+    const fileMeta = formatFileInfo(verifyFile.value);
     isVerifying.value = true;
     verificationResult.value = null;
 
     try {
-        const qrData = await extractQRFromPDF(verifyFile.value);
-
-        if (!qrData) {
+        const authData = getAuthData();
+        if (!authData?.tenant) {
             verificationResult.value = {
                 isValid: false,
-                message:
-                    "Dokumen belum ditandatangani atau tidak memiliki tanda tangan digital.",
-                fileName: verifyFile.value.name,
-                fileSize: (verifyFile.value.size / 1024).toFixed(2) + " KB",
+                message: "Tenant tidak ditemukan. Silakan login ulang.",
+                ...fileMeta,
             };
-        } else {
-            try {
-                const signatureData = JSON.parse(qrData);
-
-                verificationResult.value = {
-                    isValid: true,
-                    message:
-                        "Dokumen asli dan telah ditandatangani secara digital.",
-                    signerName: signatureData.name,
-                    signerEmail: signatureData.email,
-                    originalFileName: signatureData.file,
-                    signedDate: new Date(signatureData.date).toLocaleString(
-                        "id-ID"
-                    ),
-                    fileName: verifyFile.value.name,
-                    fileSize: (verifyFile.value.size / 1024).toFixed(2) + " KB",
-                    isValidSignature: signatureData.valid,
-                };
-            } catch (parseError) {
-                verificationResult.value = {
-                    isValid: false,
-                    message: "Tanda tangan digital tidak valid atau rusak.",
-                    fileName: verifyFile.value.name,
-                    fileSize: (verifyFile.value.size / 1024).toFixed(2) + " KB",
-                };
-            }
+            showVerificationModal.value = true;
+            return;
         }
 
+        const formData = new FormData();
+        formData.append("file", verifyFile.value);
+
+        const response = await axios.post(
+            `${API_BASE_URL}/${authData.tenant}/api/verify`,
+            formData
+        );
+
+        const data = response.data || {};
+
+        if (data.valid) {
+            const signers = Array.isArray(data.signers) ? data.signers : [];
+            const latestSigner =
+                signers.length > 0 ? signers[signers.length - 1] : null;
+
+            verificationResult.value = {
+                isValid: true,
+                message:
+                    "Dokumen asli dan telah ditandatangani secara digital.",
+                signerName: latestSigner?.name || "Tidak diketahui",
+                signerEmail: latestSigner?.email || "-",
+                originalFileName: fileMeta.fileName,
+                signedDate: formatSignedDate(latestSigner?.signedAt),
+                isValidSignature: data.signatureValid ?? null,
+                ...fileMeta,
+            };
+        } else {
+            verificationResult.value = {
+                isValid: false,
+                message: resolveVerifyMessage(data),
+                ...fileMeta,
+            };
+        }
         showVerificationModal.value = true;
     } catch (error) {
         console.error("Verification error:", error);
+        verificationResult.value = {
+            isValid: false,
+            message:
+                error?.response?.data?.message ||
+                "Gagal memverifikasi dokumen.",
+            ...fileMeta,
+        };
+        showVerificationModal.value = true;
     } finally {
         isVerifying.value = false;
     }
@@ -384,7 +441,7 @@ const closeVerificationModal = () => {
                         class="relative w-full border border-gray-300 rounded-lg overflow-hidden bg-gray-50"
                     >
                         <div
-                            class="max-h-[800px] overflow-y-auto p-4 custom-scrollbar relative"
+                            class="max-h-200 overflow-y-auto p-4 custom-scrollbar relative"
                         >
                             <VuePdfEmbed
                                 v-if="pdfUrl"
@@ -421,13 +478,21 @@ const closeVerificationModal = () => {
                             </div>
                         </div>
                     </div>
+                    <div
+                        v-if="signError"
+                        class="text-sm text-red-600 text-center"
+                    >
+                        {{ signError }}
+                    </div>
                     <div class="flex justify-center gap-4 mt-2">
                         <button
                             v-if="!isSigned"
                             @click="handleSign"
-                            class="px-6 py-2 bg-[#13087d] text-white rounded-full hover:bg-blue-900 font-medium transition-colors shadow-lg hover:shadow-xl text-sm"
+                            :disabled="isSigning"
+                            class="px-6 py-2 bg-[#13087d] text-white rounded-full hover:bg-blue-900 font-medium transition-colors shadow-lg hover:shadow-xl text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                            Tanda Tangan Sekarang
+                            <span v-if="isSigning">Memproses...</span>
+                            <span v-else>Tanda Tangan Sekarang</span>
                         </button>
                         <button
                             v-if="!isSigned"
