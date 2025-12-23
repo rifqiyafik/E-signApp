@@ -27,7 +27,19 @@ const showVerificationModal = ref(false);
 
 const user = computed(() => usePage().props?.auth?.user || null);
 
-const signerName = computed(() => user.value?.name || "Pengguna");
+const signerList = computed(() => {
+    const signers = signResult.value?.signers;
+    return Array.isArray(signers) ? signers : [];
+});
+
+const signerName = computed(() => {
+    if (signerList.value.length > 0) {
+        return (
+            signerList.value[signerList.value.length - 1]?.name || "Pengguna"
+        );
+    }
+    return user.value?.name || "Pengguna";
+});
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(
     /\/+$/,
@@ -483,6 +495,44 @@ const closeVerificationModal = () => {
                         class="text-sm text-red-600 text-center"
                     >
                         {{ signError }}
+                    </div>
+                    <div
+                        v-if="isSigned && signerList.length"
+                        class="rounded-lg border border-gray-200 bg-white p-4"
+                    >
+                        <div class="text-sm font-semibold text-gray-900">
+                            Penandatangan
+                        </div>
+                        <div class="mt-3 space-y-2">
+                            <div
+                                v-for="(signer, index) in signerList"
+                                :key="signer.userId || signer.email || index"
+                                class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border border-gray-100 rounded-md p-3 bg-gray-50"
+                            >
+                                <div>
+                                    <p
+                                        class="text-sm font-semibold text-gray-900"
+                                    >
+                                        {{ signer.name || "Tidak diketahui" }}
+                                    </p>
+                                    <p class="text-xs text-gray-500">
+                                        {{ signer.email || "-" }}
+                                    </p>
+                                </div>
+                                <div class="text-xs text-gray-500 sm:text-right">
+                                    <p>{{ signer.role || "-" }}</p>
+                                    <p>
+                                        {{
+                                            signer.signedAt
+                                                ? formatSignedDate(
+                                                      signer.signedAt
+                                                  )
+                                                : "-"
+                                        }}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="flex justify-center gap-4 mt-2">
                         <button
