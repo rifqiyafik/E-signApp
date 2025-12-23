@@ -8,6 +8,7 @@ use App\Models\DocumentVersion;
 use App\Models\UserCertificate;
 use App\Services\DocumentPayloadService;
 use App\Services\RootCaService;
+use App\Services\TsaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -117,6 +118,8 @@ class VerifyController extends Controller
         $payload = $payloadService->build($document, $version, $version->tenant_id);
         $signatureValid = $this->verifyDetachedSignature($version);
         $certificateStatus = $this->checkCertificateStatus($version);
+        $tsaStatus = $this->checkTsaStatus($version);
+        $ltvStatus = $this->checkLtvStatus($version, $tsaStatus);
 
         return array_merge([
             'valid' => true,
@@ -125,6 +128,13 @@ class VerifyController extends Controller
             'rootCaFingerprint' => $certificateStatus['rootCaFingerprint'],
             'certificateRevokedAt' => $certificateStatus['revokedAt'],
             'certificateRevokedReason' => $certificateStatus['revokedReason'],
+            'tsaStatus' => $tsaStatus['status'],
+            'tsaSignedAt' => $tsaStatus['signedAt'],
+            'tsaFingerprint' => $tsaStatus['tsaFingerprint'],
+            'tsaReason' => $tsaStatus['reason'],
+            'ltvStatus' => $ltvStatus['status'],
+            'ltvGeneratedAt' => $ltvStatus['generatedAt'],
+            'ltvIssues' => $ltvStatus['issues'],
         ], $payload);
     }
 
@@ -249,5 +259,68 @@ class VerifyController extends Controller
         }
 
         return null;
+    }
+
+    private function checkTsaStatus(DocumentVersion $version): array
+    {
+        if (!$version->tsa_token) {
+            return [
+                'status' => 'missing',
+                'reason' => null,
+                'signedAt' => optional($version->tsa_signed_at)->toIso8601String(),
+                'tsaFingerprint' => null,
+            ];
+        }
+
+        $token = json_decode($version->tsa_token, true);
+        if (!is_array($token)) {
+            return [
+                'status' => 'invalid',
+                'reason' => 'bad_token',
+                'signedAt' => optional($version->tsa_signed_at)->toIso8601String(),
+                'tsaFingerprint' => null,
+            ];
+        }
+
+        $snapshotCert = data_get($version->ltv_snapshot, 'tsa.certificate');
+        $verification = app(TsaService::class)->verifyToken($token, $version->signed_pdf_sha256, $snapshotCert);
+
+        return [
+            'status' => $verification['status'] ?? 'invalid',
+            'reason' => $verification['reason'] ?? null,
+            'signedAt' => $verification['signedAt'] ?? ($token['signedAt'] ?? optional($version->tsa_signed_at)->toIso8601String()),
+            'tsaFingerprint' => $verification['tsaFingerprint'] ?? ($token['tsaFingerprint'] ?? null),
+        ];
+    }
+
+    private function checkLtvStatus(DocumentVersion $version, array $tsaStatus): array
+    {
+        if (!$version->ltv_snapshot) {
+            return [
+                'status' => 'missing',
+                'generatedAt' => null,
+                'issues' => ['missing_snapshot'],
+            ];
+        }
+
+        $issues = [];
+        if (!data_get($version->ltv_snapshot, 'rootCa.certificate')) {
+            $issues[] = 'root_ca_missing';
+        }
+        if (!data_get($version->ltv_snapshot, 'signer.certificate')) {
+            $issues[] = 'signer_cert_missing';
+        }
+        if (!data_get($version->ltv_snapshot, 'tsa.token')) {
+            $issues[] = 'tsa_token_missing';
+        }
+        if (($tsaStatus['status'] ?? null) !== 'valid') {
+            $issues[] = 'tsa_invalid';
+        }
+
+        return [
+            'status' => $issues ? 'incomplete' : 'ready',
+            'generatedAt' => $version->ltv_snapshot['generatedAt'] ?? null,
+            'issues' => $issues,
+        ];
     }
 }

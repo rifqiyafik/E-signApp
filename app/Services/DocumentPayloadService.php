@@ -48,6 +48,28 @@ class DocumentPayloadService
             'certificateSerial' => $version->signing_cert_serial ?? $versionCertificate?->certificate_serial,
         ];
 
+        $tsaToken = null;
+        if (is_string($version->tsa_token) && $version->tsa_token !== '') {
+            $decoded = json_decode($version->tsa_token, true);
+            if (is_array($decoded)) {
+                $tsaToken = $decoded;
+            }
+        }
+        $tsaPayload = $tsaToken ? [
+            'signedAt' => $tsaToken['signedAt'] ?? optional($version->tsa_signed_at)->toIso8601String(),
+            'fingerprint' => $tsaToken['tsaFingerprint'] ?? null,
+            'algorithm' => $tsaToken['algorithm'] ?? null,
+        ] : null;
+        $ltvSnapshot = $version->ltv_snapshot ?: null;
+        $ltvPayload = $ltvSnapshot ? [
+            'enabled' => true,
+            'generatedAt' => $ltvSnapshot['generatedAt'] ?? null,
+            'rootCaFingerprint' => data_get($ltvSnapshot, 'rootCa.fingerprint'),
+            'tsaFingerprint' => data_get($ltvSnapshot, 'tsa.fingerprint'),
+        ] : [
+            'enabled' => false,
+        ];
+
         $signers = $signerRows
             ->map(function ($signer) use ($userMap, $membershipMap, $certificateMap) {
                 $user = $userMap->get($signer->user_id);
@@ -81,6 +103,8 @@ class DocumentPayloadService
             'signedPdfDownloadUrl' => $downloadUrl,
             'signedPdfSha256' => $version->signed_pdf_sha256,
             'signature' => $signatureMeta,
+            'tsa' => $tsaPayload,
+            'ltv' => $ltvPayload,
             'signers' => $signers,
         ];
     }

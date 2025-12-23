@@ -20,42 +20,75 @@ class DocumentStampService
         $pdf->SetMargins(0, 0, 0);
         $pdf->SetAutoPageBreak(false, 0);
 
+        $tempFiles = [];
         if ($signature) {
-            $this->applySignature($pdf, $signature);
+            $tempFiles = $this->applySignature($pdf, $signature);
         }
 
-        $pageCount = $pdf->setSourceFile($inputPath);
+        try {
+            $pageCount = $pdf->setSourceFile($inputPath);
 
-        for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
-            $templateId = $pdf->importPage($pageNo);
-            $size = $pdf->getTemplateSize($templateId);
-            $orientation = $size['width'] > $size['height'] ? 'L' : 'P';
+            for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
+                $templateId = $pdf->importPage($pageNo);
+                $size = $pdf->getTemplateSize($templateId);
+                $orientation = $size['width'] > $size['height'] ? 'L' : 'P';
 
-            $pdf->AddPage($orientation, [$size['width'], $size['height']]);
-            $pdf->useTemplate($templateId);
+                $pdf->AddPage($orientation, [$size['width'], $size['height']]);
+                $pdf->useTemplate($templateId);
 
-            if ($pageNo === $pageCount) {
-                $this->applyStamp($pdf, $size, $verificationUrl, $context);
+                if ($pageNo === $pageCount) {
+                    $this->applyStamp($pdf, $size, $verificationUrl, $context);
+                }
             }
-        }
 
-        $pdf->Output($outputPath, 'F');
+            $pdf->Output($outputPath, 'F');
+        } finally {
+            $this->cleanupTempFiles($tempFiles);
+        }
     }
 
-    private function applySignature(Fpdi $pdf, array $signature): void
+    private function applySignature(Fpdi $pdf, array $signature): array
     {
         $certificate = $signature['certificate'] ?? null;
         $privateKey = $signature['privateKey'] ?? null;
         $extraCerts = $signature['caCertificate'] ?? '';
 
         if (!$certificate || !$privateKey) {
-            return;
+            return [];
         }
 
         $passphrase = $signature['privateKeyPassphrase'] ?? '';
         $info = $signature['info'] ?? [];
 
-        $pdf->setSignature($certificate, $privateKey, $passphrase, $extraCerts ?: '', 2, $info);
+        $tempFiles = [];
+        $extraPath = null;
+        if ($extraCerts) {
+            $extraPath = $this->writeTempPem($extraCerts, 'extra_');
+            if ($extraPath) {
+                $tempFiles[] = $extraPath;
+            } else {
+                $this->cleanupTempFiles($tempFiles);
+                throw new \RuntimeException('Failed to prepare signing certificate.');
+            }
+        }
+
+        $keyPassphrase = is_string($passphrase) ? $passphrase : '';
+        $unencryptedKey = $this->exportUnencryptedPrivateKey($privateKey, $keyPassphrase);
+        if ($unencryptedKey) {
+            $privateKey = $unencryptedKey;
+            $keyPassphrase = '';
+        }
+
+        $pdf->setSignature(
+            $certificate,
+            $privateKey,
+            $keyPassphrase,
+            $extraPath ?: '',
+            2,
+            $info
+        );
+
+        return $tempFiles;
     }
 
     private function applyStamp(Fpdi $pdf, array $pageSize, string $verificationUrl, array $context): void
@@ -95,6 +128,63 @@ class DocumentStampService
         ];
 
         $pdf->write2DBarcode($verificationUrl, 'QRCODE,H', $x, $y, $qrSize, $qrSize, $style, 'N');
+    }
+
+    private function writeTempPem(string $contents, string $prefix): ?string
+    {
+        $path = $this->writeTempFile(storage_path('app/tmp'), $prefix, $contents);
+        if ($path) {
+            return $path;
+        }
+
+        return $this->writeTempFile(sys_get_temp_dir(), $prefix, $contents);
+    }
+
+    private function exportUnencryptedPrivateKey(string $privateKey, string $passphrase): ?string
+    {
+        $keyResource = $passphrase !== ''
+            ? openssl_pkey_get_private($privateKey, $passphrase)
+            : openssl_pkey_get_private($privateKey);
+
+        if ($keyResource === false) {
+            return null;
+        }
+
+        $exported = openssl_pkey_export($keyResource, $privateKeyPem, null);
+        if (!$exported) {
+            return null;
+        }
+
+        return $privateKeyPem;
+    }
+
+    private function writeTempFile(string $dir, string $prefix, string $contents): ?string
+    {
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return null;
+        }
+
+        $path = tempnam($dir, $prefix);
+        if ($path === false) {
+            return null;
+        }
+
+        $written = @file_put_contents($path, $contents);
+        if ($written === false) {
+            @unlink($path);
+            return null;
+        }
+
+        return $path;
+    }
+
+    private function cleanupTempFiles(array $files): void
+    {
+        foreach ($files as $file) {
+            if (is_string($file) && $file !== '' && file_exists($file)) {
+                @unlink($file);
+            }
+        }
     }
 
 }

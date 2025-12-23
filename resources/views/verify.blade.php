@@ -212,6 +212,13 @@
     $certificateStatus = $payload['certificateStatus'] ?? '-';
     $revokedAt = $payload['certificateRevokedAt'] ?? null;
     $revokedReason = $payload['certificateRevokedReason'] ?? null;
+    $tsaStatus = $payload['tsaStatus'] ?? '-';
+    $tsaSignedAt = $payload['tsaSignedAt'] ?? null;
+    $tsaReason = $payload['tsaReason'] ?? null;
+    $tsaFingerprint = $payload['tsaFingerprint'] ?? null;
+    $ltvStatus = $payload['ltvStatus'] ?? '-';
+    $ltvGeneratedAt = $payload['ltvGeneratedAt'] ?? null;
+    $ltvIssues = $payload['ltvIssues'] ?? [];
     $reason = $payload['reason'] ?? null;
     $expectedHash = $payload['expectedSignedPdfSha256'] ?? null;
 @endphp
@@ -255,6 +262,53 @@
                     <div class="meta">
                         <span>Revoked reason</span>
                         <div>{{ $revokedReason ?? '-' }}</div>
+                    </div>
+                </div>
+            @endif
+            <div class="meta-grid" style="margin-top: 12px;">
+                <div class="meta">
+                    <span>TSA status</span>
+                    <div>{{ $tsaStatus }}</div>
+                </div>
+                <div class="meta">
+                    <span>TSA signed at</span>
+                    <div>{{ $tsaSignedAt ?? '-' }}</div>
+                </div>
+                <div class="meta">
+                    <span>LTV status</span>
+                    <div>{{ $ltvStatus }}</div>
+                </div>
+            </div>
+            @if ($tsaReason || $tsaFingerprint)
+                <div class="meta-grid" style="margin-top: 12px;">
+                    <div class="meta">
+                        <span>TSA reason</span>
+                        <div>{{ $tsaReason ?? '-' }}</div>
+                    </div>
+                    <div class="meta">
+                        <span>TSA fingerprint</span>
+                        <div class="mono">{{ $tsaFingerprint ?? '-' }}</div>
+                    </div>
+                </div>
+            @endif
+            @if (!empty($ltvIssues))
+                <div class="meta-grid" style="margin-top: 12px;">
+                    <div class="meta">
+                        <span>LTV issues</span>
+                        <div class="mono">{{ implode(', ', $ltvIssues) }}</div>
+                    </div>
+                    @if ($ltvGeneratedAt)
+                        <div class="meta">
+                            <span>LTV generated at</span>
+                            <div>{{ $ltvGeneratedAt }}</div>
+                        </div>
+                    @endif
+                </div>
+            @elseif ($ltvGeneratedAt)
+                <div class="meta-grid" style="margin-top: 12px;">
+                    <div class="meta">
+                        <span>LTV generated at</span>
+                        <div>{{ $ltvGeneratedAt }}</div>
                     </div>
                 </div>
             @endif

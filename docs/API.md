@@ -11,8 +11,8 @@ download versi, hingga verifikasi dokumen.
 -   Auth: Laravel Passport personal access token per-tenant.
 -   Data: tenant/users/certificates/documents disimpan di central DB.
 -   Tenant DB: menyimpan `users`, OAuth tables, dan data tenant-specific.
--   PKI: Root CA internal; sertifikat user diterbitkan oleh CA dan statusnya dicek saat verify (valid/expired/revoked/untrusted).
--   Signing pipeline: input PDF -> stamp QR (tanpa teks) -> sign (X.509) + embed chain -> hash -> simpan versi baru.
+-   PKI: Root CA internal + TSA internal; sertifikat user diterbitkan oleh CA dan statusnya dicek saat verify (valid/expired/revoked/untrusted).
+-   Signing pipeline: input PDF -> stamp QR (tanpa teks) -> sign (X.509) + embed chain -> hash -> TSA timestamp -> simpan versi baru + LTV snapshot.
 
 ## 2) Terminologi
 
@@ -321,6 +321,13 @@ Response (valid):
 -   `rootCaFingerprint`
 -   `certificateRevokedAt` (nullable)
 -   `certificateRevokedReason` (nullable)
+-   `tsaStatus: valid | invalid | missing`
+-   `tsaSignedAt` (nullable)
+-   `tsaFingerprint` (nullable)
+-   `tsaReason` (nullable)
+-   `ltvStatus: ready | incomplete | missing`
+-   `ltvGeneratedAt` (nullable)
+-   `ltvIssues` (array, optional)
 
 Response (invalid):
 
@@ -464,6 +471,7 @@ Behavior:
 -   Membuat versi baru dan menambah signer baru.
 -   QR (tanpa teks) ditanam di halaman terakhir.
 -   Digital signature menyertakan sertifikat user + chain Root CA.
+-   TSA internal menghasilkan timestamp + LTV snapshot.
 
 Response:
 
@@ -474,6 +482,8 @@ Response:
 -   `signedPdfDownloadUrl`
 -   `signedPdfSha256`
 -   `signature` (lihat object di bawah)
+-   `tsa` (lihat object di bawah)
+-   `ltv` (lihat object di bawah)
 -   `signers[]` (lihat object di bawah)
 
 Example response:
@@ -491,6 +501,17 @@ Example response:
         "certificateFingerprint": "2c8c3b4b...",
         "certificateSubject": "CN=Test User, emailAddress=test@example.com",
         "certificateSerial": "1f9a..."
+    },
+    "tsa": {
+        "signedAt": "2025-12-22T09:20:00+00:00",
+        "fingerprint": "7d9c...",
+        "algorithm": "sha256WithRSAEncryption"
+    },
+    "ltv": {
+        "enabled": true,
+        "generatedAt": "2025-12-22T09:20:00+00:00",
+        "rootCaFingerprint": "a1b2...",
+        "tsaFingerprint": "7d9c..."
     },
     "signers": [
         {
@@ -568,12 +589,32 @@ Signature object:
 -   `certificateSubject`
 -   `certificateSerial`
 
+TSA object:
+
+-   `signedAt` (nullable)
+-   `fingerprint` (nullable)
+-   `algorithm` (nullable)
+
+LTV object:
+
+-   `enabled`
+-   `generatedAt` (nullable)
+-   `rootCaFingerprint` (nullable)
+-   `tsaFingerprint` (nullable)
+
 Verify response extras:
 
 -   `certificateStatus` -> `valid | expired | revoked | untrusted | not_yet_valid | missing`
 -   `rootCaFingerprint`
 -   `certificateRevokedAt` (nullable)
 -   `certificateRevokedReason` (nullable)
+-   `tsaStatus` -> `valid | invalid | missing`
+-   `tsaSignedAt` (nullable)
+-   `tsaFingerprint` (nullable)
+-   `tsaReason` (nullable)
+-   `ltvStatus` -> `ready | incomplete | missing`
+-   `ltvGeneratedAt` (nullable)
+-   `ltvIssues` (optional array)
 -   `expectedSignedPdfSha256` (nullable, hanya saat `hash_mismatch`)
 
 Signer object:

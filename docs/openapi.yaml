@@ -164,7 +164,7 @@ paths:
       summary: Sign dokumen PDF
       description: |
         Menerima PDF (bisa sudah ditandatangani) dan membuat versi baru.
-        QR + text akan ditanam di halaman terakhir.
+        QR (tanpa teks) ditanam di halaman terakhir.
       security:
         - bearerAuth: []
       parameters:
@@ -669,6 +669,10 @@ components:
           type: string
         signature:
           $ref: "#/components/schemas/Signature"
+        tsa:
+          $ref: "#/components/schemas/Tsa"
+        ltv:
+          $ref: "#/components/schemas/Ltv"
         signers:
           type: array
           items:
@@ -737,6 +741,28 @@ components:
             certificateRevokedReason:
               type: string
               nullable: true
+            tsaStatus:
+              type: string
+              example: valid
+            tsaSignedAt:
+              type: string
+              nullable: true
+            tsaFingerprint:
+              type: string
+              nullable: true
+            tsaReason:
+              type: string
+              nullable: true
+            ltvStatus:
+              type: string
+              example: ready
+            ltvGeneratedAt:
+              type: string
+              nullable: true
+            ltvIssues:
+              type: array
+              items:
+                type: string
     VerifyInvalidResponse:
       type: object
       properties:
@@ -763,6 +789,34 @@ components:
           type: string
         certificateSerial:
           type: string
+    Tsa:
+      type: object
+      nullable: true
+      properties:
+        signedAt:
+          type: string
+          nullable: true
+        fingerprint:
+          type: string
+          nullable: true
+        algorithm:
+          type: string
+          nullable: true
+    Ltv:
+      type: object
+      nullable: true
+      properties:
+        enabled:
+          type: boolean
+        generatedAt:
+          type: string
+          nullable: true
+        rootCaFingerprint:
+          type: string
+          nullable: true
+        tsaFingerprint:
+          type: string
+          nullable: true
     Signer:
       type: object
       properties:

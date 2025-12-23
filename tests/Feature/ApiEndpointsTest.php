@@ -134,8 +134,15 @@ class ApiEndpointsTest extends TestCase
                     'certificateSubject',
                     'certificateSerial',
                 ],
+                'tsa',
+                'ltv',
                 'signers',
             ]);
+
+        $this->assertNotEmpty($sign->json('tsa.signedAt'));
+        $this->assertNotEmpty($sign->json('tsa.fingerprint'));
+        $this->assertTrue((bool) $sign->json('ltv.enabled'));
+        $this->assertNotEmpty($sign->json('ltv.rootCaFingerprint'));
 
         $documentId = $sign->json('documentId');
         $chainId = $sign->json('chainId');
@@ -168,11 +175,75 @@ class ApiEndpointsTest extends TestCase
         ]);
 
         $verify->assertStatus(200)
-            ->assertJsonPath('valid', true);
+            ->assertJsonPath('valid', true)
+            ->assertJsonPath('signatureValid', true)
+            ->assertJsonPath('certificateStatus', 'valid')
+            ->assertJsonPath('tsaStatus', 'valid')
+            ->assertJsonPath('ltvStatus', 'ready');
 
-        $verifyChain = $this->get("/{$tenant->slug}/api/verify/{$chainId}/v1");
+        $verifyChain = $this->getJson("/{$tenant->slug}/api/verify/{$chainId}/v1");
         $verifyChain->assertStatus(200)
-            ->assertJsonPath('valid', true);
+            ->assertJsonPath('valid', true)
+            ->assertJsonPath('tsaStatus', 'valid')
+            ->assertJsonPath('ltvStatus', 'ready');
+    }
+
+    public function test_pki_root_ca_and_user_certificate_endpoints(): void
+    {
+        $tenant = $this->createTenant();
+        $this->ensurePersonalAccessClient($tenant);
+
+        $email = 'pki+' . Str::random(6) . '@example.com';
+
+        $register = $this->postJson("/{$tenant->slug}/api/auth/register", [
+            'name' => 'PKI User',
+            'email' => $email,
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+        ]);
+
+        $register->assertStatus(201);
+        $token = $register->json('accessToken');
+
+        $rootCa = $this->get("/{$tenant->slug}/api/pki/root-ca");
+        $rootCa->assertStatus(200)
+            ->assertJsonStructure([
+                'certificate',
+                'fingerprint',
+                'subject',
+                'validFrom',
+                'validTo',
+            ]);
+
+        $me = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->get("/{$tenant->slug}/api/pki/certificates/me");
+
+        $me->assertStatus(200)
+            ->assertJsonStructure([
+                'certificatePem',
+                'fingerprint',
+                'serial',
+                'subject',
+                'issuer',
+                'validFrom',
+                'validTo',
+                'revokedAt',
+                'revokedReason',
+            ]);
+
+        $revoke = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->postJson("/{$tenant->slug}/api/pki/certificates/me/revoke", [
+                'reason' => 'testing revoke',
+            ]);
+
+        $revoke->assertStatus(200)
+            ->assertJsonPath('revokedReason', 'testing revoke');
+
+        $enroll = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->postJson("/{$tenant->slug}/api/pki/certificates/me/enroll");
+
+        $enroll->assertStatus(200)
+            ->assertJsonPath('revokedAt', null);
     }
 
     public function test_auth_login_with_seeded_user(): void

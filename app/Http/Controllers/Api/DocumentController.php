@@ -9,9 +9,12 @@ use App\Models\DocumentVersion;
 use App\Models\User as CentralUser;
 use App\Services\DocumentPayloadService;
 use App\Services\DocumentStampService;
+use App\Services\RootCaService;
+use App\Services\TsaService;
 use App\Services\UserCertificateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -22,7 +25,9 @@ class DocumentController extends Controller
         Request $request,
         DocumentPayloadService $payloadService,
         DocumentStampService $stampService,
-        UserCertificateService $certificateService
+        UserCertificateService $certificateService,
+        RootCaService $rootCaService,
+        TsaService $tsaService
     ): JsonResponse
     {
         $data = $request->validate([
@@ -55,7 +60,7 @@ class DocumentController extends Controller
 
         $connection = Document::query()->getConnection();
 
-        $payload = $connection->transaction(function () use ($file, $inputHash, $tenantId, $user, $idempotencyKey, $payloadService, $stampService, $certificateService) {
+        $payload = $connection->transaction(function () use ($file, $inputHash, $tenantId, $user, $idempotencyKey, $payloadService, $stampService, $certificateService, $rootCaService, $tsaService) {
             $existingVersion = DocumentVersion::where('signed_pdf_sha256', $inputHash)
                 ->orderByDesc('created_at')
                 ->first();
@@ -104,6 +109,7 @@ class DocumentController extends Controller
                     'certificate' => $signingCredentials['certificate'] ?? null,
                     'privateKey' => $signingCredentials['privateKey'] ?? null,
                     'privateKeyPassphrase' => $signingCredentials['privateKeyPassphrase'] ?? '',
+                    'caCertificate' => $signingCredentials['caCertificate'] ?? null,
                     'info' => [
                         'Name' => $user->name,
                         'Location' => (string) $tenantId,
@@ -146,6 +152,32 @@ class DocumentController extends Controller
             }
 
             $signatureValue = base64_encode($signatureRaw);
+            $rootCa = $rootCaService->getRootCa();
+            $tsaToken = $tsaService->issue($outputHash);
+            $tsaSignedAt = isset($tsaToken['signedAt']) ? Carbon::parse($tsaToken['signedAt']) : null;
+            $tsaTokenJson = json_encode($tsaToken, JSON_UNESCAPED_SLASHES);
+            if ($tsaTokenJson === false) {
+                $tsaTokenJson = null;
+            }
+            $tsaInfo = $tsaService->getTsa();
+            $ltvSnapshot = [
+                'generatedAt' => now()->toIso8601String(),
+                'rootCa' => [
+                    'fingerprint' => $rootCa['fingerprint'] ?? null,
+                    'certificate' => $rootCa['certificate'] ?? null,
+                ],
+                'signer' => [
+                    'certificate' => $signingCredentials['certificate'] ?? null,
+                    'fingerprint' => $signingFingerprint,
+                    'subject' => $signingSubject,
+                    'serial' => $signingSerial,
+                ],
+                'tsa' => [
+                    'token' => $tsaToken,
+                    'certificate' => $tsaInfo['certificate'] ?? null,
+                    'fingerprint' => $tsaInfo['fingerprint'] ?? null,
+                ],
+            ];
 
             $version = DocumentVersion::create([
                 'document_id' => $document->id,
@@ -164,6 +196,9 @@ class DocumentController extends Controller
                 'tenant_id' => $tenantId,
                 'user_id' => $user->global_id,
                 'signed_at' => now(),
+                'tsa_signed_at' => $tsaSignedAt,
+                'tsa_token' => $tsaTokenJson,
+                'ltv_snapshot' => $ltvSnapshot,
             ]);
 
             DocumentSigner::create([

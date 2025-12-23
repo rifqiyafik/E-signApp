@@ -17,6 +17,8 @@ class DocumentVersion extends Model
 
     protected $casts = [
         'signed_at' => 'datetime',
+        'tsa_signed_at' => 'datetime',
+        'ltv_snapshot' => 'array',
     ];
 
     public function document(): BelongsTo
