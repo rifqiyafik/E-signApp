@@ -44,6 +44,10 @@ return [
             'driver' => 'passport',
             'provider' => 'tenant_users',
         ],
+        'central_api' => [
+            'driver' => 'passport',
+            'provider' => 'users',
+        ],
     ],
 
     /*
