@@ -1,8 +1,7 @@
 <script setup>
 import TextInput from "@/Components/Atoms/TextInput.vue";
-import PrimaryButton from "@/Components/Atoms/PrimaryButton.vue";
-import { Head } from "@inertiajs/vue3";
-import { reactive, ref, watch } from "vue";
+import { Head, Link, router } from "@inertiajs/vue3";
+import { onMounted, reactive, ref, watch } from "vue";
 import axios from "axios";
 import { toast } from "vue3-toastify";
 import "vue3-toastify/dist/index.css";
@@ -118,7 +117,7 @@ const applyValidationErrors = (errors) => {
 
 const resolveErrorMessage = (response) => {
     if (response?.status === 409) {
-        return "Email sudah terdaftar.";
+        return response.data.message;
     }
     return response?.data?.message || "Registrasi gagal. Coba lagi.";
 };
@@ -182,10 +181,14 @@ const handleSubmit = async () => {
 
         axios.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
         toast.success("Registrasi berhasil.");
+        router.visit("/");
     } catch (error) {
         const response = error?.response;
 
-        if (response?.status === 422 && applyValidationErrors(response.data?.errors)) {
+        if (
+            response?.status === 422 &&
+            applyValidationErrors(response.data?.errors)
+        ) {
             toast.error("Data belum lengkap atau tidak valid.", "error");
             return;
         }
@@ -202,6 +205,22 @@ FORM_FIELDS.forEach((field) => {
         () => clearFieldError(field)
     );
 });
+
+onMounted(() => {
+    const storedAuth = window.localStorage.getItem(STORAGE_KEY);
+    if (!storedAuth) {
+        return;
+    }
+
+    try {
+        const parsed = JSON.parse(storedAuth);
+        if (parsed?.accessToken) {
+            router.visit("/");
+        }
+    } catch (error) {
+        console.warn("Invalid auth data in localStorage", error);
+    }
+});
 </script>
 
 <template>
@@ -210,7 +229,7 @@ FORM_FIELDS.forEach((field) => {
         class="flex flex-col justify-center items-center bg-[#13087d] min-h-screen"
     >
         <div
-            class="bg-white rounded-2xl max-w-xl w-full p-12 drop-shadow-2xl flex flex-col gap-6"
+            class="bg-white rounded-2xl max-w-2xl w-full p-10 drop-shadow-2xl flex flex-col gap-6"
         >
             <div class="flex flex-col gap-3">
                 <div class="flex items-center gap-2">
@@ -234,7 +253,7 @@ FORM_FIELDS.forEach((field) => {
                 </div>
             </div>
             <form @submit.prevent="handleSubmit">
-                <div class="flex flex-col gap-4">
+                <div class="grid gap-4 md:grid-cols-2">
                     <div class="flex flex-col gap-1">
                         <TextInput
                             id="tenantName"
@@ -267,7 +286,7 @@ FORM_FIELDS.forEach((field) => {
                             type="text"
                             class="mt-1 block w-full"
                             :disabled="isSubmitting"
-                            labelValue="Tenant Slug (Opsional)"
+                            labelValue="Tenant Slug"
                             placeholder="contoh: demo"
                             autocomplete="organization"
                             autocapitalize="none"
@@ -367,13 +386,13 @@ FORM_FIELDS.forEach((field) => {
                         </p>
                     </div>
 
-                    <PrimaryButton
-                        class="w-full justify-center py-3 text-xs mt-3"
+                    <button
+                        class="px-6 py-2 bg-[#13087d] text-white rounded-lg hover:bg-blue-900 font-medium transition-colors shadow-lg hover:shadow-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed w-full justify-center mt-3 md:col-span-2"
                         :disabled="isSubmitting"
                     >
-                        <span
+                        <div
                             v-if="isSubmitting"
-                            class="inline-flex items-center justify-center"
+                            class="flex gap-2 items-center justify-center"
                         >
                             <svg
                                 class="h-4 w-4 animate-spin"
@@ -395,10 +414,19 @@ FORM_FIELDS.forEach((field) => {
                                     d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
                                 />
                             </svg>
-                            <span class="sr-only">Memproses...</span>
-                        </span>
+                            <span>Memproses...</span>
+                        </div>
                         <span v-else>Daftar</span>
-                    </PrimaryButton>
+                    </button>
+                    <p class="text-center text-sm text-gray-600 md:col-span-2">
+                        Sudah punya akun?
+                        <Link
+                            href="/login"
+                            class="font-semibold text-[#13087d] hover:text-[#190b9f]"
+                        >
+                            Masuk
+                        </Link>
+                    </p>
                 </div>
             </form>
         </div>

@@ -1,8 +1,6 @@
 <script setup>
 import { ref, computed } from "vue";
-import { usePage } from "@inertiajs/vue3";
 import axios from "axios";
-import QRCode from "qrcode";
 import VuePdfEmbed from "vue-pdf-embed";
 import VerificationModal from "@/Components/Sign/VerificationModal.vue";
 
@@ -15,7 +13,6 @@ const selectedFile = ref(null);
 const isSigned = ref(false);
 const isSigning = ref(false);
 const pdfUrl = ref(null);
-const qrCodeUrl = ref(null);
 const signResult = ref(null);
 const signError = ref("");
 
@@ -25,20 +22,9 @@ const isVerifying = ref(false);
 const verificationResult = ref(null);
 const showVerificationModal = ref(false);
 
-const user = computed(() => usePage().props?.auth?.user || null);
-
 const signerList = computed(() => {
     const signers = signResult.value?.signers;
     return Array.isArray(signers) ? signers : [];
-});
-
-const signerName = computed(() => {
-    if (signerList.value.length > 0) {
-        return (
-            signerList.value[signerList.value.length - 1]?.name || "Pengguna"
-        );
-    }
-    return user.value?.name || "Pengguna";
 });
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(
@@ -105,29 +91,34 @@ const resolveVerifyMessage = (data) => {
     return "Dokumen tidak valid atau belum ditandatangani.";
 };
 
-const buildQrPayload = (data) => {
-    if (!data) {
-        return "";
+const updatePdfPreview = (source) => {
+    if (pdfUrl.value) {
+        URL.revokeObjectURL(pdfUrl.value);
+    }
+    pdfUrl.value = source ? URL.createObjectURL(source) : null;
+};
+
+const resetSignState = () => {
+    isSigned.value = false;
+    isSigning.value = false;
+    signResult.value = null;
+    signError.value = "";
+};
+
+const setSelectedFile = (file) => {
+    if (!file || file.type !== "application/pdf") {
+        return false;
     }
 
-    const payload = {
-        documentId: data.documentId ?? null,
-        chainId: data.chainId ?? null,
-        versionNumber: data.versionNumber ?? null,
-        verificationUrl: data.verificationUrl ?? null,
-        signedPdfSha256: data.signedPdfSha256 ?? null,
-        signature: data.signature ?? null,
-        tsa: data.tsa ?? null,
-        ltv: data.ltv ?? null,
-        signers: Array.isArray(data.signers) ? data.signers : [],
-    };
+    selectedFile.value = file;
+    resetSignState();
+    updatePdfPreview(file);
+    return true;
+};
 
-    const json = JSON.stringify(payload);
-    try {
-        return btoa(json);
-    } catch (error) {
-        console.warn("Failed to encode QR payload", error);
-        return json;
+const setVerifyFile = (file) => {
+    if (file?.type === "application/pdf") {
+        verifyFile.value = file;
     }
 };
 
@@ -137,39 +128,13 @@ const triggerFileInput = () => {
 
 const handleFileSelect = (event) => {
     const file = event.target?.files?.[0];
-    if (!file || file.type !== "application/pdf") {
-        return;
-    }
-
-    selectedFile.value = file;
-    isSigned.value = false;
-    isSigning.value = false;
-    signResult.value = null;
-    signError.value = "";
-    qrCodeUrl.value = null;
-    if (pdfUrl.value) {
-        URL.revokeObjectURL(pdfUrl.value);
-    }
-    pdfUrl.value = URL.createObjectURL(file);
+    setSelectedFile(file);
 };
 
 const handleDrop = (event) => {
     event.preventDefault();
     const file = event.dataTransfer?.files?.[0];
-    if (!file || file.type !== "application/pdf") {
-        return;
-    }
-
-    selectedFile.value = file;
-    isSigned.value = false;
-    isSigning.value = false;
-    signResult.value = null;
-    signError.value = "";
-    qrCodeUrl.value = null;
-    if (pdfUrl.value) {
-        URL.revokeObjectURL(pdfUrl.value);
-    }
-    pdfUrl.value = URL.createObjectURL(file);
+    setSelectedFile(file);
 };
 
 const handleSign = async () => {
@@ -205,26 +170,6 @@ const handleSign = async () => {
         signResult.value = response.data || null;
         isSigned.value = true;
 
-        if (signResult.value) {
-            const qrPayload = buildQrPayload(signResult.value);
-
-            try {
-                qrCodeUrl.value = await QRCode.toDataURL(qrPayload, {
-                    errorCorrectionLevel: "H",
-                });
-            } catch (error) {
-                console.warn("QR payload too large, fallback to URL", error);
-                if (signResult.value?.verificationUrl) {
-                    qrCodeUrl.value = await QRCode.toDataURL(
-                        signResult.value.verificationUrl,
-                        {
-                            errorCorrectionLevel: "H",
-                        }
-                    );
-                }
-            }
-        }
-
         if (signResult.value?.signedPdfDownloadUrl) {
             const signedResponse = await axios.get(
                 signResult.value.signedPdfDownloadUrl,
@@ -236,10 +181,7 @@ const handleSign = async () => {
                 }
             );
 
-            if (pdfUrl.value) {
-                URL.revokeObjectURL(pdfUrl.value);
-            }
-            pdfUrl.value = URL.createObjectURL(signedResponse.data);
+            updatePdfPreview(signedResponse.data);
         }
     } catch (error) {
         console.error("Error signing document", error);
@@ -299,17 +241,13 @@ const triggerVerifyFileInput = () => {
 
 const handleVerifyFileSelect = (event) => {
     const file = event.target?.files?.[0];
-    if (file?.type === "application/pdf") {
-        verifyFile.value = file;
-    }
+    setVerifyFile(file);
 };
 
 const handleVerifyDrop = (event) => {
     event.preventDefault();
     const file = event.dataTransfer?.files?.[0];
-    if (file?.type === "application/pdf") {
-        verifyFile.value = file;
-    }
+    setVerifyFile(file);
 };
 
 const handleVerify = async () => {
@@ -446,14 +384,12 @@ const closeVerificationModal = () => {
                 <div v-if="!selectedFile" class="space-y-6">
                     <div class="text-center mb-8 flex flex-col gap-2">
                         <h2 class="text-xl font-bold text-gray-900">
-                            Upload Dokumen untuk Ditandatangani
+                            Tanda Tangan Dokumen Digital
                         </h2>
-                        <p class="text-gray-600 text-sm">
-                            Format yang didukung: PDF. Maksimal ukuran file:
-                            10MB.
+                        <p class="text-sm text-gray-600">
+                            Upload dokumen untuk ditandatangani.
                         </p>
                     </div>
-
                     <div
                         @click="triggerFileInput"
                         @dragover.prevent
@@ -484,11 +420,9 @@ const closeVerificationModal = () => {
                         <div
                             class="mt-4 flex text-sm text-gray-600 justify-center"
                         >
-                            <p>Upload file PDF atau drag and drop</p>
+                            <p>Upload dokumen untuk ditandatangani</p>
                         </div>
-                        <p class="text-xs text-gray-600 mt-2">
-                            PDF hingga 10MB
-                        </p>
+                        <p class="text-xs text-gray-600 mt-2">PDF file</p>
                     </div>
                 </div>
 
@@ -519,31 +453,6 @@ const closeVerificationModal = () => {
                             />
                             <div v-else class="text-gray-500 text-center py-20">
                                 Loading Preview...
-                            </div>
-
-                            <div
-                                v-if="isSigned && qrCodeUrl"
-                                class="absolute bottom-10 right-10 bg-white/90 backdrop-blur-sm p-4 border border-gray-200 shadow-2xl rounded-xl z-20 flex flex-col items-center gap-2 animate-bounce-in"
-                                style="bottom: 5%; right: 5%"
-                            >
-                                <img
-                                    :src="qrCodeUrl"
-                                    alt="Signature QR Code"
-                                    class="w-24 h-24"
-                                />
-                                <div class="text-center">
-                                    <p class="text-xs font-bold text-[#13087d]">
-                                        DIGITALLY SIGNED
-                                    </p>
-                                    <p
-                                        class="text-[10px] text-gray-600 font-medium"
-                                    >
-                                        {{ signerName }}
-                                    </p>
-                                    <p class="text-[10px] text-gray-500">
-                                        {{ new Date().toLocaleDateString() }}
-                                    </p>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -576,7 +485,9 @@ const closeVerificationModal = () => {
                                         {{ signer.email || "-" }}
                                     </p>
                                 </div>
-                                <div class="text-xs text-gray-500 sm:text-right">
+                                <div
+                                    class="text-xs text-gray-500 sm:text-right"
+                                >
                                     <p>{{ signer.role || "-" }}</p>
                                     <p>
                                         {{
@@ -596,22 +507,48 @@ const closeVerificationModal = () => {
                             v-if="!isSigned"
                             @click="handleSign"
                             :disabled="isSigning"
-                            class="px-6 py-2 bg-[#13087d] text-white rounded-full hover:bg-blue-900 font-medium transition-colors shadow-lg hover:shadow-xl text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                            class="px-6 py-2 bg-[#13087d] text-white rounded-full hover:bg-blue-900 font-medium transition-colors shadow-lg hover:shadow-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         >
-                            <span v-if="isSigning">Memproses...</span>
+                            <div
+                                v-if="isSigning"
+                                class="flex items-center justify-center gap-2"
+                            >
+                                <svg
+                                    class="h-4 w-4 animate-spin"
+                                    viewBox="0 0 24 24"
+                                    aria-hidden="true"
+                                >
+                                    <circle
+                                        class="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        stroke-width="4"
+                                        fill="none"
+                                    />
+                                    <path
+                                        class="opacity-75"
+                                        fill="currentColor"
+                                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                                    />
+                                </svg>
+                                Memproses
+                            </div>
                             <span v-else>Tanda Tangan Sekarang</span>
                         </button>
+
                         <button
                             v-if="!isSigned"
                             @click="selectedFile = null"
-                            class="px-6 py-2 border border-gray-300 rounded-full text-gray-700 hover:bg-gray-50 font-medium transition-colors text-sm"
+                            class="px-6 py-2 border border-gray-300 rounded-full text-gray-700 hover:bg-gray-50 font-medium transition-colors text-sm cursor-pointer"
                         >
                             Batal
                         </button>
                         <button
                             v-if="isSigned"
                             @click="handleSave"
-                            class="px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 font-medium transition-colors shadow-lg text-sm flex items-center gap-2"
+                            class="px-6 py-2 bg-[#13087d] text-white rounded-full hover:bg-[#190b9f] font-medium transition-colors shadow-lg text-sm flex items-center gap-2 cursor-pointer"
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -635,7 +572,7 @@ const closeVerificationModal = () => {
                                 selectedFile = null;
                                 isSigned = false;
                             "
-                            class="px-6 py-2 bg-green-600 text-white rounded-full hover:bg-green-700 font-medium transition-colors shadow-lg text-sm"
+                            class="px-6 py-2 bg-green-600 text-white rounded-full hover:bg-green-700 font-medium transition-colors shadow-lg text-sm cursor-pointer"
                         >
                             Selesai / Upload Baru
                         </button>
@@ -697,7 +634,7 @@ const closeVerificationModal = () => {
                     >
                         <div class="flex items-center gap-3">
                             <svg
-                                class="h-8 w-8 text-red-600"
+                                class="h-8 w-8 text-[#13087d]"
                                 fill="currentColor"
                                 viewBox="0 0 20 20"
                             >
@@ -718,7 +655,7 @@ const closeVerificationModal = () => {
                         </div>
                         <button
                             @click="verifyFile = null"
-                            class="text-gray-400 hover:text-gray-600"
+                            class="text-gray-400 hover:text-gray-600 cursor-pointer"
                         >
                             <svg
                                 class="h-5 w-5"
@@ -740,14 +677,39 @@ const closeVerificationModal = () => {
                         <button
                             @click="handleVerify"
                             :disabled="isVerifying"
-                            class="px-6 py-2 bg-[#13087d] text-white rounded-full hover:bg-blue-900 font-medium transition-colors shadow-lg hover:shadow-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            class="px-6 py-2 bg-[#13087d] text-white rounded-full hover:bg-blue-900 font-medium transition-colors shadow-lg hover:shadow-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         >
-                            <span v-if="isVerifying">Memverifikasi...</span>
+                            <div
+                                v-if="isVerifying"
+                                class="flex items-center justify-center gap-2"
+                            >
+                                <svg
+                                    class="h-4 w-4 animate-spin"
+                                    viewBox="0 0 24 24"
+                                    aria-hidden="true"
+                                >
+                                    <circle
+                                        class="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        stroke-width="4"
+                                        fill="none"
+                                    />
+                                    <path
+                                        class="opacity-75"
+                                        fill="currentColor"
+                                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                                    />
+                                </svg>
+                                Memverifikasi
+                            </div>
                             <span v-else>Verifikasi Dokumen</span>
                         </button>
                         <button
                             @click="verifyFile = null"
-                            class="px-6 py-2 border border-gray-300 rounded-full text-gray-700 hover:bg-gray-50 font-medium transition-colors text-sm"
+                            class="px-6 py-2 border border-gray-300 rounded-full text-gray-700 hover:bg-gray-50 font-medium transition-colors text-sm cursor-pointer"
                         >
                             Batal
                         </button>

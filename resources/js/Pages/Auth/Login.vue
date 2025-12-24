@@ -1,7 +1,6 @@
 <script setup>
 import TextInput from "@/Components/Atoms/TextInput.vue";
-import PrimaryButton from "@/Components/Atoms/PrimaryButton.vue";
-import { Head, router } from "@inertiajs/vue3";
+import { Head, Link, router } from "@inertiajs/vue3";
 import { onMounted, reactive, ref, watch } from "vue";
 import axios from "axios";
 import { toast } from "vue3-toastify";
@@ -267,13 +266,13 @@ REQUIRED_FIELDS.forEach(({ name }) => {
                         </p>
                     </div>
 
-                    <PrimaryButton
-                        class="w-full justify-center py-3 text-xs mt-3"
+                    <button
+                        class="px-6 py-2 bg-[#13087d] text-white rounded-lg hover:bg-blue-900 font-medium transition-colors shadow-lg hover:shadow-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed w-full justify-center mt-3"
                         :disabled="isSubmitting"
                     >
-                        <span
+                        <div
                             v-if="isSubmitting"
-                            class="inline-flex items-center justify-center"
+                            class="flex gap-2 items-center justify-center"
                         >
                             <svg
                                 class="h-4 w-4 animate-spin"
@@ -295,10 +294,19 @@ REQUIRED_FIELDS.forEach(({ name }) => {
                                     d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
                                 />
                             </svg>
-                            <span class="sr-only">Memproses...</span>
-                        </span>
+                            <span>Memproses...</span>
+                        </div>
                         <span v-else>Masuk</span>
-                    </PrimaryButton>
+                    </button>
+                    <p class="text-center text-sm text-gray-600">
+                        Belum punya akun?
+                        <Link
+                            href="/register"
+                            class="font-semibold text-[#13087d] hover:text-[#190b9f]"
+                        >
+                            Daftar gratis
+                        </Link>
+                    </p>
                 </div>
             </form>
         </div>

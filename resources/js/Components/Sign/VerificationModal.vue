@@ -19,7 +19,7 @@ const close = () => {
 };
 
 const statusLabel = computed(() =>
-    props.result?.isValid ? "VALID" : "TIDAK VALID"
+    props.result?.isValid ? "Valid" : "Tidak Valid"
 );
 
 const formatStatus = (value) => {
@@ -67,7 +67,7 @@ const signerList = computed(() =>
         @click.self="close"
     >
         <div
-            class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 relative animate-bounce-in max-h-[90vh] overflow-y-auto"
+            class="no-scrollbar bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 relative animate-bounce-in max-h-[90vh] overflow-y-auto"
         >
             <button
                 @click="close"
@@ -128,22 +128,20 @@ const signerList = computed(() =>
                         </svg>
                     </div>
                     <div class="flex-1">
-                        <div class="flex items-center gap-2">
-                            <h3 class="text-lg font-bold text-gray-900">
-                                Verifikasi Dokumen
-                            </h3>
-                            <span
-                                class="text-[11px] font-semibold px-2 py-0.5 rounded-full"
-                                :class="
-                                    result?.isValid
-                                        ? 'bg-green-100 text-green-700'
-                                        : 'bg-red-100 text-red-700'
-                                "
-                            >
-                                {{ statusLabel }}
-                            </span>
-                        </div>
-                        <p class="text-sm text-gray-600 mt-1">
+                        <h3 class="text-lg font-bold text-gray-900">
+                            Verifikasi Dokumen
+                        </h3>
+                        <span
+                            class="text-xs font-semibold mt-1"
+                            :class="
+                                result?.isValid
+                                    ? 'text-green-700'
+                                    : 'text-red-700'
+                            "
+                        >
+                            {{ statusLabel }}
+                        </span>
+                        <p class="text-xs text-gray-600 mt-1">
                             {{ result?.message }}
                         </p>
                     </div>
@@ -151,38 +149,70 @@ const signerList = computed(() =>
 
                 <div class="mt-4 bg-gray-50 rounded-xl p-4 text-sm space-y-2">
                     <div class="flex items-start justify-between gap-4">
-                        <span class="text-gray-500">File</span>
-                        <span class="text-right text-gray-900 break-words">
+                        <span class="text-gray-500 text-xs">File</span>
+                        <span
+                            class="text-right text-gray-900 wrap-break-word text-xs"
+                        >
                             {{ fileLabel }}
                         </span>
                     </div>
                     <div class="flex items-center justify-between">
-                        <span class="text-gray-500">Versi</span>
-                        <span class="font-medium text-gray-900">
+                        <span class="text-gray-500 text-xs">Versi</span>
+                        <span
+                            class="font-medium text-gray-900 text-xs px-2 py-0.5"
+                        >
                             {{ versionLabel }}
                         </span>
                     </div>
                     <div class="flex items-center justify-between">
-                        <span class="text-gray-500">Signature</span>
-                        <span class="font-medium text-gray-900">
+                        <span class="text-gray-500 text-xs">Signature</span>
+                        <span
+                            class="text-xs font-semibold px-2 py-0.5 rounded-full normal-case"
+                            :class="
+                                result?.isValid
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-red-100 text-red-700'
+                            "
+                        >
                             {{ signatureStatus }}
                         </span>
                     </div>
                     <div class="flex items-center justify-between">
-                        <span class="text-gray-500">Sertifikat</span>
-                        <span class="font-medium text-gray-900">
+                        <span class="text-gray-500 text-xs">Sertifikat</span>
+                        <span
+                            class="text-xs font-semibold px-2 py-0.5 rounded-full"
+                            :class="
+                                result?.isValid
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-red-100 text-red-700'
+                            "
+                        >
                             {{ certificateStatus }}
                         </span>
                     </div>
                     <div class="flex items-center justify-between">
-                        <span class="text-gray-500">TSA</span>
-                        <span class="font-medium text-gray-900">
+                        <span class="text-gray-500 text-xs">TSA</span>
+                        <span
+                            class="text-xs font-semibold px-2 py-0.5 rounded-full"
+                            :class="
+                                result?.isValid
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-red-100 text-red-700'
+                            "
+                        >
                             {{ tsaStatus }}
                         </span>
                     </div>
                     <div class="flex items-center justify-between">
-                        <span class="text-gray-500">LTV</span>
-                        <span class="font-medium text-gray-900">
+                        <span class="text-gray-500 text-xs">LTV</span>
+                        <span
+                            class="text-xs font-semibold px-2 py-0.5 rounded-full"
+                            :class="
+                                result?.isValid
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-red-100 text-red-700'
+                            "
+                        >
                             {{ ltvStatus }}
                         </span>
                     </div>
@@ -191,7 +221,7 @@ const signerList = computed(() =>
                 <div
                     class="mt-4 rounded-xl border border-[#e6e0f7] bg-[#f7f4ff] p-4"
                 >
-                    <p class="text-xs font-semibold text-[#6a4cc0] uppercase">
+                    <p class="text-xs font-semibold text-[#13087d] normal-case">
                         Penandatangan
                     </p>
                     <div v-if="signerList.length" class="mt-3 space-y-3">
@@ -201,7 +231,7 @@ const signerList = computed(() =>
                             class="flex items-center gap-3"
                         >
                             <span
-                                class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#ebe5fb] text-[#6a4cc0] text-xs font-semibold"
+                                class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#ebe5fb] text-[#13087d] text-xs font-semibold"
                             >
                                 {{ signer.index ?? index + 1 }}
                             </span>
@@ -225,7 +255,7 @@ const signerList = computed(() =>
 
             <button
                 @click="close"
-                class="mt-6 w-full px-6 py-2.5 bg-[#6a4cc0] text-white rounded-full hover:bg-[#5a3fb3] font-medium transition-colors shadow-lg"
+                class="mt-6 w-full px-6 py-2 bg-[#13087d] text-white rounded-full hover:bg-[#190b9f] font-medium transition-colors shadow-lg cursor-pointer"
             >
                 OK
             </button>
@@ -253,5 +283,15 @@ const signerList = computed(() =>
 
 .animate-bounce-in {
     animation: bounce-in 0.6s ease-out;
+}
+
+.no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 </style>

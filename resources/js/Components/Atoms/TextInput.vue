@@ -34,7 +34,13 @@ defineExpose({ focus: () => input.value.focus() });
         <label class="block font-semibold text-sm text-gray-900" :for="$attrs.id">
             <span v-if="labelValue">{{ labelValue }}</span>
             <span v-else><slot /></span>
-            <span v-if="$attrs.required" class="text-red-500">*</span>
+            <span
+                v-if="$attrs.required !== undefined"
+                class="ml-1 text-red-500"
+                aria-hidden="true"
+            >
+                *
+            </span>
         </label>
 
         <input
