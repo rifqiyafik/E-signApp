@@ -213,25 +213,31 @@ Content-Type: multipart/form-data
 
 ## 5) Quick Start
 
-### Step 1: Buat Superadmin (sekali saja)
+### Step 1: Buat Superadmin
+
+Jalankan seeder untuk membuat superadmin:
 
 ```bash
-php artisan tinker
+php artisan db:seed --class=SuperAdminSeeder
 ```
 
-```php
-use App\Models\User;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Hash;
+Atau dengan custom credentials di `.env`:
 
-$superadmin = User::create([
-    'global_id' => (string) Str::ulid(),
-    'name' => 'Superadmin',
-    'email' => 'admin@example.com',
-    'password' => Hash::make('secret123'),
-    'is_superadmin' => true,
-]);
+```env
+SUPERADMIN_EMAIL=admin@example.com
+SUPERADMIN_PASSWORD=secret123
+SUPERADMIN_NAME=Superadmin
 ```
+
+Lalu jalankan:
+
+```bash
+php artisan db:seed --class=SuperAdminSeeder
+```
+
+**Default credentials (jika tidak diset di .env):**
+- Email: `admin@example.com`
+- Password: `secret123`
 
 ### Step 2: Login Global
 
