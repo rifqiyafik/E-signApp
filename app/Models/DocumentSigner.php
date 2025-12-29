@@ -27,4 +27,13 @@ class DocumentSigner extends Model
     {
         return $this->belongsTo(DocumentVersion::class, 'version_id');
     }
+
+    /**
+     * Get the user who is assigned to sign.
+     * Links via global_id (stored in user_id column) to central User.
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id', 'global_id');
+    }
 }

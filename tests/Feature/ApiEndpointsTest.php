@@ -31,6 +31,24 @@ class ApiEndpointsTest extends TestCase
 
     public function test_central_tenant_register_endpoint(): void
     {
+        // Create superadmin user first
+        $superadmin = CentralUser::create([
+            'global_id' => (string) Str::ulid(),
+            'name' => 'Super Admin',
+            'email' => 'superadmin@test.com',
+            'password' => 'secret123',
+            'is_superadmin' => true,
+        ]);
+
+        // Get central token via login
+        $login = $this->postJson('/api/auth/login', [
+            'email' => 'superadmin@test.com',
+            'password' => 'secret123'
+        ]);
+
+        $login->assertStatus(200);
+        $token = $login->json('accessToken');
+
         $payload = [
             'tenantName' => 'Nusa Work ' . Str::random(4),
             'name' => 'Rifqi Test',
@@ -39,7 +57,8 @@ class ApiEndpointsTest extends TestCase
             'password_confirmation' => 'secret123',
         ];
 
-        $response = $this->postJson('/api/tenants/register', $payload);
+        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->postJson('/api/tenants/register', $payload);
 
         $response->assertStatus(201)
             ->assertJsonStructure([
@@ -75,7 +94,7 @@ class ApiEndpointsTest extends TestCase
         ]);
 
         $register->assertStatus(201)
-            ->assertJsonStructure(['accessToken', 'tenantId', 'userId']);
+            ->assertJsonStructure(['accessToken', 'tenantId', 'user' => ['global_id', 'name', 'email', 'role']]);
 
         $login = $this->postJson("/{$tenant->slug}/api/auth/login", [
             'email' => $email,
@@ -83,7 +102,7 @@ class ApiEndpointsTest extends TestCase
         ]);
 
         $login->assertStatus(200)
-            ->assertJsonStructure(['accessToken', 'tenantId', 'userId']);
+            ->assertJsonStructure(['accessToken', 'tenantId', 'user' => ['global_id', 'name', 'email', 'role']]);
 
         $token = $login->json('accessToken');
 
@@ -287,7 +306,7 @@ class ApiEndpointsTest extends TestCase
         ]);
 
         $login->assertStatus(200)
-            ->assertJsonStructure(['accessToken', 'tenantId', 'userId']);
+            ->assertJsonStructure(['accessToken', 'tenantId', 'user' => ['global_id', 'name', 'email', 'role']]);
     }
 
     private function createTenant(): Tenant
@@ -403,4 +422,135 @@ class ApiEndpointsTest extends TestCase
 
         return $pdf->Output('', 'S');
     }
+
+    // =========================================================================
+    // Document Workflow Tests
+    // =========================================================================
+
+    public function test_admin_can_upload_draft_document(): void
+    {
+        $tenant = $this->createTenant();
+        $this->ensurePersonalAccessClient($tenant);
+
+        $email = 'admin+' . Str::random(6) . '@example.com';
+
+        // Register admin user
+        $register = $this->postJson("/{$tenant->slug}/api/auth/register", [
+            'name' => 'Admin User',
+            'email' => $email,
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+        ]);
+
+        $register->assertStatus(201);
+        $token = $register->json('accessToken');
+
+        // Upload draft
+        $upload = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->post("/{$tenant->slug}/api/documents/drafts", [
+                'file' => $this->makePdfUpload(),
+            ]);
+
+        $upload->assertStatus(201)
+            ->assertJsonStructure([
+                'document' => [
+                    'documentId',
+                    'chainId',
+                    'status',
+                    'draftSha256',
+                    'originalFilename',
+                ],
+            ]);
+
+        $this->assertEquals('draft', $upload->json('document.status'));
+    }
+
+    public function test_admin_can_assign_signers_to_document(): void
+    {
+        $tenant = $this->createTenant();
+        $this->ensurePersonalAccessClient($tenant);
+
+        // Create admin
+        $adminEmail = 'admin+' . Str::random(6) . '@example.com';
+        $register = $this->postJson("/{$tenant->slug}/api/auth/register", [
+            'name' => 'Admin',
+            'email' => $adminEmail,
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+        ]);
+        $adminToken = $register->json('accessToken');
+
+        // Create signer users
+        $signer1Email = 'signer1+' . Str::random(6) . '@example.com';
+        $this->postJson("/{$tenant->slug}/api/auth/register", [
+            'name' => 'Signer 1',
+            'email' => $signer1Email,
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+        ]);
+
+        $signer2Email = 'signer2+' . Str::random(6) . '@example.com';
+        $this->postJson("/{$tenant->slug}/api/auth/register", [
+            'name' => 'Signer 2',
+            'email' => $signer2Email,
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+        ]);
+
+        // Upload draft
+        $upload = $this->withHeader('Authorization', 'Bearer ' . $adminToken)
+            ->post("/{$tenant->slug}/api/documents/drafts", [
+                'file' => $this->makePdfUpload(),
+            ]);
+
+        $documentId = $upload->json('document.documentId');
+
+        // Assign signers
+        $assign = $this->withHeader('Authorization', 'Bearer ' . $adminToken)
+            ->postJson("/{$tenant->slug}/api/documents/{$documentId}/signers", [
+                'signers' => [
+                    ['user' => $signer1Email, 'role' => 'First Signer'],
+                    ['user' => $signer2Email, 'role' => 'Second Signer'],
+                ],
+            ]);
+
+        $assign->assertStatus(200)
+            ->assertJsonPath('document.status', 'need_signature')
+            ->assertJsonPath('document.currentSignerIndex', 1);
+    }
+
+    public function test_admin_can_list_all_documents(): void
+    {
+        $tenant = $this->createTenant();
+        $this->ensurePersonalAccessClient($tenant);
+
+        $email = 'admin+' . Str::random(6) . '@example.com';
+        $register = $this->postJson("/{$tenant->slug}/api/auth/register", [
+            'name' => 'Admin',
+            'email' => $email,
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+        ]);
+        $token = $register->json('accessToken');
+
+        // Upload 2 drafts
+        $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->post("/{$tenant->slug}/api/documents/drafts", ['file' => $this->makePdfUpload()]);
+        $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->post("/{$tenant->slug}/api/documents/drafts", ['file' => $this->makePdfUpload()]);
+
+        // Get list
+        $list = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->getJson("/{$tenant->slug}/api/documents");
+
+        $list->assertStatus(200)
+            ->assertJsonCount(2, 'data');
+    }
+
+    /**
+     * NOTE: Full signer workflow test (sign endpoint via workflow) is skipped 
+     * because it requires complex PKI/Storage setup that works differently in test environment.
+     * The direct sign endpoint (test_documents_sign_versions_download_and_verify) already 
+     * verifies the core signing functionality.
+     */
 }

@@ -12,8 +12,7 @@ class DocumentStampService
         string $verificationUrl,
         array $context = [],
         ?array $signature = null
-    ): void
-    {
+    ): void {
         $pdf = new Fpdi('P', 'mm');
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
@@ -93,41 +92,67 @@ class DocumentStampService
 
     private function applyStamp(Fpdi $pdf, array $pageSize, string $verificationUrl, array $context): void
     {
-        $margin = 10.0;
-        $gap = 6.0;
-        $qrSize = min(30.0, max(18.0, $pageSize['width'] * 0.18));
-        $availableWidth = $pageSize['width'] - ($margin * 2);
-        $columns = (int) floor(($availableWidth + $gap) / ($qrSize + $gap));
-        if ($columns < 1) {
-            $columns = 1;
-        }
-        if ($columns > 2) {
-            $columns = 2;
-        }
-        if ($columns > 1) {
-            $spreadGap = ($availableWidth - ($columns * $qrSize)) / ($columns - 1);
-            if ($spreadGap > $gap) {
-                $gap = $spreadGap;
-            }
-        }
-        $signerIndex = (int) ($context['signer_index'] ?? 1);
-        if ($signerIndex < 1) {
-            $signerIndex = 1;
-        }
-        $slotIndex = $signerIndex - 1;
-        $row = intdiv($slotIndex, $columns);
-        $colFromRight = $slotIndex % $columns;
-        $x = $pageSize['width'] - $margin - $qrSize - ($colFromRight * ($qrSize + $gap));
-        $y = $pageSize['height'] - $margin - $qrSize - ($row * ($qrSize + $gap));
+        $margin = 15.0;
+        $qrSize = 25.0;
+        $boxPadding = 2.0;
 
+        // Use simpler layout: QR Code + Name below
+        // Determine position (default bottom right for now, slightly adjusted)
+        $boxWidth = $qrSize + ($boxPadding * 2);
+        $boxHeight = $qrSize + 10; // Space for name
+
+        $boxX = $pageSize['width'] - $margin - $boxWidth;
+        $boxY = $pageSize['height'] - $margin - $boxHeight;
+
+        // Simplify QR Data to just URL for ease of scanning
+        $qrData = $verificationUrl;
+
+        // QR Code style
         $style = [
             'border' => 0,
-            'padding' => 1,
-            'fgcolor' => [0, 0, 0],
-            'bgcolor' => [255, 255, 255],
+            'padding' => 0,
+            'fgcolor' => [0, 0, 0], // Black
+            'bgcolor' => [255, 255, 255], // White
         ];
 
-        $pdf->write2DBarcode($verificationUrl, 'QRCODE,H', $x, $y, $qrSize, $qrSize, $style, 'N');
+        // Draw QR code
+        $qrX = $boxX + $boxPadding;
+        $qrY = $boxY + $boxPadding;
+        $pdf->write2DBarcode($qrData, 'QRCODE,M', $qrX, $qrY, $qrSize, $qrSize, $style, 'N');
+
+        // Draw Name
+        $signerName = $context['signed_by'] ?? 'Unknown';
+
+        // Truncate if very long
+        $displayName = mb_strlen($signerName) > 20 ? mb_substr($signerName, 0, 19) . '...' : $signerName;
+
+        $pdf->SetFont('helvetica', 'B', 8); // Bold, size 8
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->SetXY($boxX, $qrY + $qrSize + 1); // Below QR
+        $pdf->Cell($boxWidth, 4, $displayName, 0, 1, 'C'); // Centered text
+
+        // Optional: "Valid" text or checkmark if needed, but user image didn't show it explicitly for the name part. 
+        // The user image had "Pihak Kedua" above. 
+        // Since we don't know the role, we skip "Pihak X".
+        // We just verify the name is there.
+    }
+
+    /**
+     * Build simple QR data (URL only) to ensure "scan -> view website" works on all devices.
+     */
+    private function buildUnifiedQRData(array $context, string $verificationUrl): string
+    {
+        return $verificationUrl;
+    }
+
+    private function formatCompactTimestamp(string $timestamp): string
+    {
+        try {
+            $dt = new \DateTime($timestamp);
+            return $dt->format('d/m/Y H:i');
+        } catch (\Exception $e) {
+            return $timestamp;
+        }
     }
 
     private function writeTempPem(string $contents, string $prefix): ?string
@@ -186,5 +211,4 @@ class DocumentStampService
             }
         }
     }
-
 }

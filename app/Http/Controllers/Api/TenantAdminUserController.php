@@ -14,6 +14,24 @@ use Illuminate\Support\Str;
 
 class TenantAdminUserController extends Controller
 {
+    /**
+     * List all users in current tenant
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $tenantId = tenant('id');
+
+        // Get tenant users from tenant database (already in tenant context)
+        $users = TenantUser::query()
+            ->select(['id', 'global_id', 'name', 'email', 'role', 'is_owner', 'created_at'])
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'users' => $users,
+        ]);
+    }
+
     public function store(Request $request, UserCertificateService $certificateService, AuditLogService $auditLogService): JsonResponse
     {
         $tenantId = tenant('id');
@@ -21,7 +39,7 @@ class TenantAdminUserController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:255'],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'password' => ['required', 'string', 'min:8'],
             'role' => ['nullable', 'string', 'max:50'],
         ], [
             'name.required' => 'Nama wajib diisi.',
@@ -33,27 +51,91 @@ class TenantAdminUserController extends Controller
             'password.required' => 'Password wajib diisi.',
             'password.string' => 'Password harus berupa teks.',
             'password.min' => 'Password minimal 8 karakter.',
-            'password.confirmed' => 'Konfirmasi password tidak sama.',
             'role.string' => 'Role harus berupa teks.',
             'role.max' => 'Role maksimal 50 karakter.',
         ], [
             'name' => 'nama',
             'email' => 'email',
             'password' => 'password',
-            'password_confirmation' => 'konfirmasi password',
             'role' => 'role',
         ]);
 
-        if (CentralUser::where('email', $data['email'])->exists()) {
-            return response()->json([
-                'message' => 'Email sudah terdaftar.',
-                'code' => 'email_already_registered',
-                'errors' => [
-                    'email' => ['Email sudah terdaftar.'],
+        $role = $data['role'] ?? 'member';
+
+        // Check if user already exists in central database
+        $existingCentralUser = CentralUser::where('email', $data['email'])->first();
+
+        if ($existingCentralUser) {
+            // Check if already assigned to this tenant
+            $existingMembership = CentralTenantUser::where('tenant_id', $tenantId)
+                ->where('global_user_id', $existingCentralUser->global_id)
+                ->exists();
+
+            if ($existingMembership) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User dengan email ini sudah terdaftar di tenant ini.',
+                    'code' => 'user_already_in_tenant',
+                    'errors' => [
+                        'email' => ['User dengan email ini sudah terdaftar di tenant ini.'],
+                    ],
+                ], 409);
+            }
+
+            // User exists in central but not in this tenant - assign them
+            CentralTenantUser::updateOrCreate(
+                [
+                    'tenant_id' => $tenantId,
+                    'global_user_id' => $existingCentralUser->global_id,
                 ],
-            ], 409);
+                [
+                    'role' => $role,
+                    'is_owner' => false,
+                    'tenant_join_date' => now(),
+                ]
+            );
+
+            // Ensure user exists in tenant database
+            TenantUser::updateOrCreate(
+                [
+                    'global_id' => $existingCentralUser->global_id,
+                ],
+                [
+                    'name' => $existingCentralUser->name,
+                    'email' => $existingCentralUser->email,
+                    'password' => $existingCentralUser->password,
+                    'tenant_id' => $tenantId,
+                    'role' => $role,
+                    'is_owner' => false,
+                    'tenant_join_date' => now(),
+                ]
+            );
+
+            $certificateService->ensureForUser($existingCentralUser);
+
+            $auditLogService->log(
+                $request,
+                'tenant_user_assigned',
+                $tenantId,
+                $request->user()?->global_id,
+                CentralUser::class,
+                $existingCentralUser->global_id,
+                ['role' => $role, 'existing_user' => true]
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User berhasil ditambahkan ke tenant.',
+                'user' => [
+                    'userId' => $existingCentralUser->global_id,
+                    'name' => $existingCentralUser->name,
+                    'email' => $existingCentralUser->email,
+                    'role' => $role,
+                ],
+            ], 201);
         }
 
+        // Create new user
         $centralUser = CentralUser::create([
             'global_id' => (string) Str::ulid(),
             'name' => $data['name'],
@@ -61,26 +143,33 @@ class TenantAdminUserController extends Controller
             'password' => $data['password'],
         ]);
 
-        $role = $data['role'] ?? 'member';
+        // Use updateOrCreate to prevent duplicate entry errors
+        CentralTenantUser::updateOrCreate(
+            [
+                'tenant_id' => $tenantId,
+                'global_user_id' => $centralUser->global_id,
+            ],
+            [
+                'role' => $role,
+                'is_owner' => false,
+                'tenant_join_date' => now(),
+            ]
+        );
 
-        CentralTenantUser::create([
-            'tenant_id' => $tenantId,
-            'global_user_id' => $centralUser->global_id,
-            'role' => $role,
-            'is_owner' => false,
-            'tenant_join_date' => now(),
-        ]);
-
-        TenantUser::create([
-            'global_id' => $centralUser->global_id,
-            'name' => $centralUser->name,
-            'email' => $centralUser->email,
-            'password' => $centralUser->password,
-            'tenant_id' => $tenantId,
-            'role' => $role,
-            'is_owner' => false,
-            'tenant_join_date' => now(),
-        ]);
+        TenantUser::updateOrCreate(
+            [
+                'global_id' => $centralUser->global_id,
+            ],
+            [
+                'name' => $centralUser->name,
+                'email' => $centralUser->email,
+                'password' => $centralUser->password,
+                'tenant_id' => $tenantId,
+                'role' => $role,
+                'is_owner' => false,
+                'tenant_join_date' => now(),
+            ]
+        );
 
         $certificateService->ensureForUser($centralUser);
 
@@ -193,6 +282,54 @@ class TenantAdminUserController extends Controller
                 'email' => $centralUser->email,
                 'role' => $role ?: ($membership?->role ?? $tenantUser?->role ?? 'member'),
             ],
+        ]);
+    }
+
+    /**
+     * Remove user from tenant (does not delete from central database)
+     */
+    public function destroy(string $user, AuditLogService $auditLogService): JsonResponse
+    {
+        $tenantId = tenant('id');
+
+        // Find user by global_id
+        $tenantUser = TenantUser::where('global_id', $user)->first();
+
+        if (!$tenantUser) {
+            return response()->json([
+                'message' => 'User tidak ditemukan.',
+                'code' => 'user_not_found',
+            ], 404);
+        }
+
+        // Prevent removing owner
+        if ($tenantUser->is_owner) {
+            return response()->json([
+                'message' => 'Tidak dapat menghapus owner tenant.',
+                'code' => 'cannot_remove_owner',
+            ], 403);
+        }
+
+        // Remove from tenant database
+        $tenantUser->delete();
+
+        // Remove from central pivot table
+        CentralTenantUser::where('tenant_id', $tenantId)
+            ->where('global_user_id', $user)
+            ->delete();
+
+        $auditLogService->log(
+            request(),
+            'tenant_user_removed',
+            $tenantId,
+            request()->user()?->global_id,
+            CentralUser::class,
+            $user,
+            []
+        );
+
+        return response()->json([
+            'message' => 'User berhasil dihapus dari tenant.',
         ]);
     }
 }

@@ -60,6 +60,9 @@ Route::middleware(['auth:api'])->group(function () {
     // Document Workflow Endpoints
     // =========================================================================
 
+    // List all documents (tenant admin)
+    Route::get('/documents', [DocumentWorkflowController::class, 'adminDocumentList']);
+
     // Upload draft document (tenant admin)
     Route::post('/documents/drafts', [DocumentWorkflowController::class, 'uploadDraft']);
 
@@ -90,10 +93,16 @@ Route::middleware(['auth:api'])->group(function () {
     // Tenant Admin User Management
     // =========================================================================
 
+    // List all users in tenant
+    Route::get('/admin/users', [TenantAdminUserController::class, 'index']);
+
     // Create new user and add to tenant
     Route::post('/admin/users', [TenantAdminUserController::class, 'store']);
 
     // Assign existing user to tenant
     Route::post('/admin/users/assign', [TenantAdminUserController::class, 'assign']);
+
+    // Remove user from tenant
+    Route::delete('/admin/users/{user}', [TenantAdminUserController::class, 'destroy']);
 });
 

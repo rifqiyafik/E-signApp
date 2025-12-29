@@ -79,7 +79,13 @@ class AuthController extends Controller
         return response()->json([
             'accessToken' => $token,
             'tenantId' => $tenantId,
-            'userId' => $centralUser->global_id,
+            'user' => [
+                'global_id' => $centralUser->global_id,
+                'name' => $centralUser->name,
+                'email' => $centralUser->email,
+                'role' => 'member',
+                'is_owner' => false,
+            ],
         ], 201);
     }
 
@@ -106,10 +112,22 @@ class AuthController extends Controller
 
         $token = $user->createToken('api')->accessToken;
 
+        // Get membership to retrieve role
+        $tenantId = tenant('id');
+        $membership = CentralTenantUser::where('tenant_id', $tenantId)
+            ->where('global_user_id', $user->global_id)
+            ->first();
+
         return response()->json([
             'accessToken' => $token,
-            'tenantId' => tenant('id'),
-            'userId' => $user->global_id,
+            'tenantId' => $tenantId,
+            'user' => [
+                'global_id' => $user->global_id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $membership?->role ?? 'member',
+                'is_owner' => (bool) ($membership?->is_owner ?? false),
+            ],
         ]);
     }
 

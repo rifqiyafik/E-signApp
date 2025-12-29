@@ -376,6 +376,9 @@ class DocumentWorkflowController extends Controller
         $absolutePath = $disk->path($relativePath);
         $inputPath = $disk->path($sourcePath);
 
+        // Calculate source file hash for QR embedding
+        $sourceHash = hash_file('sha256', $inputPath);
+
         $stampService->stamp(
             $inputPath,
             $absolutePath,
@@ -384,6 +387,7 @@ class DocumentWorkflowController extends Controller
                 'signed_by' => $user->name,
                 'signed_at' => now()->toIso8601String(),
                 'signer_index' => $currentSigner->signer_index,
+                'document_hash' => substr($sourceHash, 0, 16), // First 16 chars for compact QR
             ],
             [
                 'certificate' => $signingCredentials['certificate'] ?? null,
@@ -544,6 +548,38 @@ class DocumentWorkflowController extends Controller
         );
     }
 
+    public function adminDocumentList(Request $request): JsonResponse
+    {
+        $tenantId = tenant('id');
+        $documents = Document::where('created_by_tenant_id', $tenantId)
+            ->with(['signers.user'])
+            ->latest()
+            ->get()
+            ->map(function ($doc) {
+                return [
+                    'id' => $doc->id,
+                    'documentId' => $doc->id, // alias for consistency
+                    'title' => $doc->original_filename,
+                    'status' => $doc->status,
+                    'created_at' => $doc->created_at->toIso8601String(),
+                    'signers' => $doc->signers->sortBy('signer_index')->map(function ($s) {
+                        return [
+                            'id' => $s->id,
+                            'status' => $s->status,
+                            'signer_order' => $s->signer_index,
+                            'email' => $s->user->email ?? 'unknown',
+                            'user' => [
+                                'name' => $s->user->name ?? 'Unknown',
+                                'email' => $s->user->email ?? 'unknown',
+                            ]
+                        ];
+                    })->values(),
+                ];
+            });
+
+        return response()->json(['data' => $documents]);
+    }
+
     public function inbox(Request $request): JsonResponse
     {
         $tenantId = tenant('id');
@@ -551,11 +587,12 @@ class DocumentWorkflowController extends Controller
 
         $signers = DocumentSigner::where('tenant_id', $tenantId)
             ->where('user_id', $user->global_id)
-            ->with('document')
+            ->with(['document', 'document.signers.user'])
             ->get();
 
         $needSignature = [];
-        $waiting = [];
+        $waiting = [];      // You already signed, waiting for others
+        $upcoming = [];     // Waiting for your turn (previous signers haven't signed yet)
         $completed = [];
 
         foreach ($signers as $signer) {
@@ -564,24 +601,37 @@ class DocumentWorkflowController extends Controller
                 continue;
             }
 
-            if ($signer->status === 'active') {
-                $needSignature[] = $this->summarizeDocument($document);
-                continue;
-            }
+            $docSummary = $this->summarizeDocumentWithSigners($document, $signer);
 
+            // Document completed - all signers done
             if ($document->status === Document::STATUS_COMPLETED) {
-                $completed[] = $this->summarizeDocument($document);
+                $completed[] = $docSummary;
                 continue;
             }
 
+            // Your turn to sign
+            if ($signer->status === 'active') {
+                $needSignature[] = $docSummary;
+                continue;
+            }
+
+            // You already signed, waiting for next signers
+            if ($signer->status === 'signed') {
+                $waiting[] = $docSummary;
+                continue;
+            }
+
+            // Queued = waiting for your turn (previous signers haven't finished)
             if ($signer->status === 'queued') {
-                $waiting[] = $this->summarizeDocument($document);
+                $upcoming[] = $docSummary;
+                continue;
             }
         }
 
         return response()->json([
             'needSignature' => $needSignature,
             'waiting' => $waiting,
+            'upcoming' => $upcoming,
             'completed' => $completed,
         ]);
     }
@@ -629,7 +679,7 @@ class DocumentWorkflowController extends Controller
         ]);
     }
 
-    private function summarizeDocument(Document $document): array
+    private function summarizeDocument(Document $document, ?DocumentSigner $signer = null): array
     {
         $latestVersion = $document->latestSignedVersion;
 
@@ -644,6 +694,46 @@ class DocumentWorkflowController extends Controller
                 'signedAt' => optional($latestVersion->signed_at)->toIso8601String(),
                 'signedPdfDownloadUrl' => url("/" . tenant('id') . "/api/documents/{$document->id}/versions/v{$latestVersion->version_number}:download"),
             ] : null,
+            'yourSignerIndex' => $signer?->signer_index,
+        ];
+    }
+
+    private function summarizeDocumentWithSigners(Document $document, ?DocumentSigner $yourSigner = null): array
+    {
+        $latestVersion = $document->latestSignedVersion;
+
+        // Get all signers for this document with their status
+        $signers = $document->signers->sortBy('signer_index')->map(function ($s) use ($document) {
+            return [
+                'id' => $s->id,
+                'signerIndex' => $s->signer_index,
+                'status' => $s->status,
+                'name' => $s->user?->name ?? null,
+                'email' => $s->user?->email ?? null,
+                'signedAt' => optional($s->signed_at)->toIso8601String(),
+                'isCurrent' => $s->signer_index === $document->current_signer_index,
+            ];
+        })->values()->toArray();
+
+        return [
+            'documentId' => $document->id,
+            'chainId' => $document->chain_id,
+            'title' => $document->original_filename,
+            'status' => $document->status,
+            'currentSignerIndex' => $document->current_signer_index,
+            'totalSigners' => count($signers),
+            'signedCount' => collect($signers)->where('status', 'signed')->count(),
+            'yourSignerIndex' => $yourSigner?->signer_index,
+            'yourStatus' => $yourSigner?->status,
+            'signers' => $signers,
+            'latestVersion' => $latestVersion ? [
+                'versionNumber' => $latestVersion->version_number,
+                'signedAt' => optional($latestVersion->signed_at)->toIso8601String(),
+            ] : null,
+            'completedAt' => $document->status === Document::STATUS_COMPLETED
+                ? optional($document->updated_at)->toIso8601String()
+                : null,
+            'createdAt' => optional($document->created_at)->toIso8601String(),
         ];
     }
 
