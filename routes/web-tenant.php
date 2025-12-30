@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 /*
 |--------------------------------------------------------------------------
@@ -10,16 +11,16 @@ use Illuminate\Support\Facades\Route;
 | Here you can register web routes for your tenant application.
 | All routes here are prefixed with /{tenant}
 |
-| Example:
-| Route::get('/dashboard', [DashboardController::class, 'index']);
-| -> Accessible at: /{tenant}/dashboard
-|
 */
 
+// Home redirect to dashboard
 Route::get('/', function () {
-    return view('tenant.welcome', [
-        'tenant' => tenant(),
-    ]);
+    return redirect()->route('tenant.dashboard');
 })->name('tenant.home');
 
-// Add more tenant web routes here
+// Dashboard
+Route::get('/dashboard', function () {
+    return Inertia::render('Tenant/Dashboard', [
+        'tenant' => tenant()?->only(['id', 'name', 'slug']),
+    ]);
+})->name('tenant.dashboard');

@@ -4,9 +4,11 @@ namespace App\Http\Middleware;
 
 use Closure;
 use App\Models\Tenant;
+use Illuminate\Support\Facades\Log;
 use Stancl\Tenancy\Middleware\InitializeTenancyByPath;
 use Illuminate\Http\Request;
 use Stancl\Tenancy\Contracts\TenantCouldNotBeIdentifiedException;
+use Stancl\Tenancy\Exceptions\TenantDatabaseDoesNotExistException;
 
 /**
  * Initialize Tenancy By Path Or ID
@@ -35,6 +37,19 @@ class InitializeTenancyByPathOrId extends InitializeTenancyByPath
                 $tenant = Tenant::find($tenantIdentifier);
             }
 
+            if (!$tenant && (in_array('api', $route->gatherMiddleware(), true) || $request->expectsJson())) {
+                Log::warning('Tenant not found for API request', [
+                    'tenant' => $tenantIdentifier,
+                    'path' => $request->path(),
+                    'host' => $request->getHost(),
+                ]);
+
+                return response()->json([
+                    'message' => 'Tenant not found.',
+                    'tenant' => $tenantIdentifier,
+                ], 404);
+            }
+
             // Abort 404 for web routes if tenant not found
             if (!$tenant && in_array('web', $route->gatherMiddleware())) {
                 abort(404);
@@ -59,6 +74,22 @@ class InitializeTenancyByPathOrId extends InitializeTenancyByPath
                 } else {
                     $response = $next($request);
                 }
+            } elseif ($th instanceof TenantDatabaseDoesNotExistException) {
+                $tenantIdentifier = $request->route()?->parameter('tenant');
+                Log::error('Tenant database missing', [
+                    'tenant' => $tenantIdentifier,
+                    'path' => $request->path(),
+                    'host' => $request->getHost(),
+                ]);
+
+                if ($request->expectsJson() || in_array('api', $request->route()?->gatherMiddleware() ?? [], true)) {
+                    return response()->json([
+                        'message' => 'Tenant database not initialized.',
+                        'tenant' => $tenantIdentifier,
+                    ], 500);
+                }
+
+                abort(500, 'Tenant database not initialized.');
             } else {
                 throw $th;
             }
